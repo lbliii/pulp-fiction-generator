@@ -1,0 +1,27 @@
+# Core Dependencies
+crewai>=0.119.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+pydantic>=2.4.2
+aiohttp>=3.8.5
+httpx>=0.24.1
+
+# CLI and Formatting
+rich>=13.6.0
+typer>=0.9.0
+markdown>=3.5
+pyyaml>=6.0.1
+
+# Development Tools
+pytest>=7.4.0
+ruff>=0.1.2
+pre-commit>=3.5.0
+
+# Export Capabilities
+weasyprint>=60.1
+
+# Optional Dependencies
+# Uncomment if needed
+# fastapi>=0.104.0
+# uvicorn>=0.24.0
+# sqlmodel>=0.0.8 
