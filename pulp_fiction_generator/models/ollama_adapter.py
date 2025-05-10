@@ -13,6 +13,7 @@ from contextlib import contextmanager
 import time
 
 from .model_service import ModelService
+from ..utils.config import config
 
 
 class TimeoutError(Exception):
@@ -47,48 +48,37 @@ class OllamaAdapter(ModelService):
     
     def __init__(
         self, 
-        model_name: str = "llama3.2",
-        api_base: str = "http://localhost:11434",
+        model_name: Optional[str] = None,
+        api_base: Optional[str] = None,
         timeout: int = 120
     ):
         """
         Initialize the Ollama adapter.
         
         Args:
-            model_name: Name of the Ollama model to use
-            api_base: Base URL for the Ollama API
+            model_name: Name of the Ollama model to use, overrides config if provided
+            api_base: Base URL for the Ollama API, overrides config if provided
             timeout: Request timeout in seconds
         """
-        self.model_name = model_name
-        self.api_base = api_base
+        # Use the centralized configuration with overrides if provided
+        self.model_name = model_name or config.ollama.model
+        self.api_base = api_base or config.ollama.host
         self.timeout = timeout
         
-        # Override with environment variables if available
-        if os.environ.get("OLLAMA_HOST"):
-            self.api_base = os.environ.get("OLLAMA_HOST")
-        
-        if os.environ.get("OLLAMA_MODEL"):
-            self.model_name = os.environ.get("OLLAMA_MODEL")
-            
-        # Get default resource configurations from environment variables
-        self.default_threads = int(os.environ.get("OLLAMA_THREADS", 4))
-        self.default_gpu_layers = int(os.environ.get("OLLAMA_GPU_LAYERS", 0))
-        self.default_ctx_size = int(os.environ.get("OLLAMA_CTX_SIZE", 4096))
-        self.default_batch_size = int(os.environ.get("OLLAMA_BATCH_SIZE", 256))
+        # Get default resource configurations from config
+        self.default_threads = config.ollama.threads
+        self.default_gpu_layers = config.ollama.gpu_layers
+        self.default_ctx_size = config.ollama.ctx_size
+        self.default_batch_size = config.ollama.batch_size
     
     def get_default_ollama_params(self) -> Dict[str, Any]:
         """
-        Get default Ollama parameters from environment variables.
+        Get default Ollama parameters from configuration.
         
         Returns:
             Dictionary with default Ollama parameters
         """
-        return {
-            "num_thread": self.default_threads,
-            "num_gpu": self.default_gpu_layers,
-            "num_ctx": self.default_ctx_size,
-            "num_batch": self.default_batch_size
-        }
+        return config.get_ollama_params()
     
     def generate(self, prompt: str, parameters: Optional[Dict[str, Any]] = None) -> str:
         """

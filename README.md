@@ -14,6 +14,92 @@ This project uses CrewAI and Ollama (with Llama 3.2) to create a local, cost-eff
 - **Serialized Output**: Creates stories that can continue across multiple sessions
 - **Modular Architecture**: Easy to extend with new capabilities
 
+## New Features
+
+### Code Modularization
+The codebase has been significantly refactored to improve maintainability and extensibility:
+- Command-line interface has been modularized with separate modules for each command
+- New command registration system allows easy addition of new commands
+- Consistent error handling across all commands
+
+### Plugin Architecture
+A new plugin architecture has been implemented to allow extending the system without modifying core code:
+- Genre plugins for adding new pulp fiction genres
+- Agent plugins for creating specialized AI agent types
+- Model plugins for adding support for additional LLM providers
+- Custom plugins can be created and installed independently
+
+To use plugins:
+```bash
+# List available plugins
+pulp-fiction plugins
+
+# List only genre plugins
+pulp-fiction plugins --genre
+
+# Generate a story using a plugin genre
+pulp-fiction generate --genre <plugin-id> --chapters 1
+```
+
+### Enhanced Error Handling
+A comprehensive error handling system has been implemented to improve reliability:
+- Specific exception classes for different error types
+- Automatic recovery strategies for common failure scenarios
+- Detailed error logging with contextual information
+- Easy application of error handling via decorators
+
+Error handling examples:
+```python
+# Apply error handling to a function
+from pulp_fiction_generator.utils.errors import with_error_handling
+
+@with_error_handling
+def my_function():
+    # Function code here
+    pass
+
+# Use specific exception types
+from pulp_fiction_generator.utils.errors import ModelConnectionError
+
+try:
+    # Code that interacts with the model
+except ModelConnectionError as e:
+    # Handle specifically model connection issues
+```
+
+### Performance Benchmarking
+A comprehensive benchmarking system has been implemented for tracking performance:
+- Measure execution time, memory usage, and custom metrics
+- Compare benchmark results to identify improvements or regressions
+- Save and analyze benchmark history
+- Easy application of benchmarking via decorators
+
+Benchmarking examples:
+```python
+# Apply benchmarking to a function
+from pulp_fiction_generator.utils.benchmarks import benchmark
+
+@benchmark(iterations=5, name="my_benchmark")
+def my_function():
+    # Function code here
+    pass
+
+# Manual benchmarking
+from pulp_fiction_generator.utils.benchmarks import Benchmark
+
+benchmark = Benchmark("custom_benchmark")
+result = benchmark.run(my_function, arg1, arg2)
+benchmark.save_results()
+```
+
+### Custom Plugin Development
+Plugins can be created and installed in several ways:
+1. Place in `~/.pulp-fiction/plugins/` (user-specific plugins)
+2. Place in `./plugins/` (project-local plugins) 
+3. Install as Python packages with the naming pattern `pulp-fiction-plugin-*`
+
+For detailed instructions on creating your own plugins, see [Plugin Development Guide](docs/plugin_development.md).
+
 ## Setup
 
 ### Prerequisites
@@ -76,7 +162,11 @@ pulp-fiction-generator/
 │   ├── prompts/                 # Agent prompts
 │   ├── models/                  # Model interaction
 │   ├── genres/                  # Genre-specific elements
+│   ├── plugins/                 # Plugin system
 │   └── utils/                   # Utility functions
+│       ├── config.py            # Configuration management
+│       ├── error_handling.py    # Error handling system
+│       └── benchmarks.py        # Performance benchmarking
 ├── tests/                       # Tests directory
 ├── examples/                    # Example stories and usage
 ├── .env.example                 # Environment variable example

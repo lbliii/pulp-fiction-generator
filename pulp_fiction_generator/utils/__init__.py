@@ -1,15 +1,42 @@
 """
-Utility functions and classes for the pulp fiction generator.
+Utility modules and components for the Pulp Fiction Generator.
+
+This module provides various utility classes and functions used throughout
+the Pulp Fiction Generator application.
 """
 
-from pulp_fiction_generator.utils.context_visualizer import ContextVisualizer
-from pulp_fiction_generator.utils.story_persistence import StoryPersistence
-from pulp_fiction_generator.utils.consistency import ConsistencyChecker
-from pulp_fiction_generator.utils.story_exporter import StoryExporter
+# Error handling components
+from .errors import (
+    PulpFictionError, TimeoutError, ConfigurationError,
+    ModelServiceError, ModelConnectionError, ModelResponseError,
+    ContentGenerationError, AgentError, StoryPersistenceError,
+    InputValidationError, CliArgumentError,
+    TimeoutManager, DiagnosticCollector, DiagnosticLogger,
+    RecoveryStrategy, ModelRetryStrategy, FallbackPromptStrategy, ConfigurationFixStrategy,
+    RecoveryStrategyRegistry, ErrorHandler, ErrorInformationExtractor,
+    with_error_handling, setup_error_handling, timeout
+)
 
+# Context visualization components
+from .context_visualizer import (
+    ContextData, ContextDiffCalculator, ConsoleVisualizer,
+    FileStorage, ContextVisualizer
+)
+
+# Re-export commonly used components for convenience
+# This provides a clean API for importing from pulp_fiction_generator.utils
 __all__ = [
-    'ContextVisualizer',
-    'StoryPersistence',
-    'ConsistencyChecker',
-    'StoryExporter',
+    # Error handling
+    'PulpFictionError', 'TimeoutError', 'ConfigurationError',
+    'ModelServiceError', 'ModelConnectionError', 'ModelResponseError',
+    'ContentGenerationError', 'AgentError', 'StoryPersistenceError',
+    'InputValidationError', 'CliArgumentError',
+    'TimeoutManager', 'DiagnosticCollector', 'DiagnosticLogger',
+    'RecoveryStrategy', 'ModelRetryStrategy', 'FallbackPromptStrategy', 'ConfigurationFixStrategy',
+    'RecoveryStrategyRegistry', 'ErrorHandler', 'ErrorInformationExtractor',
+    'with_error_handling', 'setup_error_handling', 'timeout',
+    
+    # Context visualization
+    'ContextData', 'ContextDiffCalculator', 'ConsoleVisualizer',
+    'FileStorage', 'ContextVisualizer'
 ] 

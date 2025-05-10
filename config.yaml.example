@@ -1,0 +1,50 @@
+# Pulp Fiction Generator Configuration Example
+# Copy this file to ~/.pulp-fiction/config.yaml or ./config.yaml
+
+# Ollama configuration
+ollama:
+  host: "http://localhost:11434"
+  model: "llama3.2"
+  threads: 8
+  gpu_layers: 32
+  ctx_size: 8192
+  batch_size: 512
+
+# Application settings
+app:
+  debug: false
+  log_level: "info"  # debug, info, warning, error, critical
+  output_dir: "./output"
+  genres_dir: "./pulp_fiction_generator/genres"
+  enable_telemetry: false
+
+# Story generation settings
+generation:
+  max_retry_count: 3
+  generation_timeout: 300  # seconds
+  temperature: 0.7
+  top_p: 0.9
+
+# Agent settings
+agent:
+  enable_delegation: false
+  verbose: true
+
+# Cache settings
+cache:
+  enable_cache: true
+  cache_dir: "./.cache"
+  max_cache_size: 1024  # MB
+
+# Plugin-specific configurations can be added here
+# Example: Western genre plugin configuration
+western-genre:
+  default_setting: "1880s frontier"
+  character_types: ["sheriff", "outlaw", "settler"]
+
+# Example: OpenAI model plugin configuration
+openai-model:
+  api_key: ""  # Set your API key here or use environment variable
+  model: "gpt-4"
+  temperature: 0.7
+  max_tokens: 1000 

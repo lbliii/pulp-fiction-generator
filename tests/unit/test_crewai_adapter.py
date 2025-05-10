@@ -104,7 +104,7 @@ def main():
     print("\nTrying to execute the crew...")
     try:
         print("Setting timeout to 120 seconds to ensure enough time")
-        from pulp_fiction_generator.utils.error_handling import timeout
+        from pulp_fiction_generator.utils.errors import timeout
         with timeout(120):
             print("Starting kickoff...")
             result = test_crew.kickoff()

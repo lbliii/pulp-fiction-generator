@@ -1,36 +1,28 @@
 """
-AgentFactory creates and configures specialized agents for the story generation process.
+Main agent factory orchestrator.
+
+This module provides the high-level agent factory that orchestrates the
+creation of different types of agents by delegating to specialized factories.
 """
 
-import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-import yaml
-import glob
-
-from crewai import Agent, Task
-from pydantic import BaseModel
+from crewai import Agent
 
 from ..models.model_service import ModelService
-from ..models.crewai_adapter import CrewAIModelAdapter
-
-
-class AgentConfig(BaseModel):
-    """Configuration for an agent"""
-    role: str
-    goal: str
-    backstory: str
-    verbose: bool = True
-    allow_delegation: bool = False
-    tools: Optional[List[Any]] = None
+from .config.config_loader import AgentConfigLoader
+from .builder.agent_builder import AgentBuilder
+from .factories.creative_agent_factory import CreativeAgentFactory
+from .factories.content_agent_factory import ContentAgentFactory
+from .factories.support_agent_factory import SupportAgentFactory
 
 
 class AgentFactory:
     """
-    Factory for creating specialized agents for story generation.
+    Main factory for creating specialized agents for story generation.
     
-    This factory handles the creation and configuration of specialized agents
-    based on genre, user preferences, and other parameters.
+    This factory delegates to specialized factories for different types of agents
+    while providing a unified interface for agent creation.
     """
     
     def __init__(
@@ -48,108 +40,30 @@ class AgentFactory:
             verbose: Whether to enable verbose output for agents
         """
         self.model_service = model_service
-        self.config_dir = config_dir
         self.verbose = verbose
         
-        # Create a CrewAI-compatible wrapper for the model service
-        self.crewai_model = CrewAIModelAdapter(ollama_adapter=model_service)
+        # Set up component classes
+        self.config_loader = AgentConfigLoader(config_dir=config_dir)
+        self.agent_builder = AgentBuilder(model_service=model_service)
         
-        # Ensure config directories exist
-        self._ensure_config_dirs()
-    
-    def _ensure_config_dirs(self):
-        """
-        Ensure the configuration directories exist, create them if they don't.
-        Also create default configs if none exist.
-        """
-        # Ensure base config dir exists
-        if not os.path.exists(self.config_dir):
-            os.makedirs(self.config_dir, exist_ok=True)
-            
-        # Ensure generic config dir exists
-        generic_dir = os.path.join(self.config_dir, "generic")
-        if not os.path.exists(generic_dir):
-            os.makedirs(generic_dir, exist_ok=True)
-            
-        # Create default configs if they don't exist
-        self._create_default_config_if_missing(
-            "researcher", 
-            {
-                "role": "Pulp Fiction Research Specialist",
-                "goal": "Uncover genre-appropriate elements, historical context, and reference material",
-                "backstory": "A meticulous researcher with deep knowledge of pulp fiction history across multiple genres",
-                "verbose": True,
-                "allow_delegation": False
-            }
+        # Set up specialized factories
+        self.creative_factory = CreativeAgentFactory(
+            config_loader=self.config_loader,
+            agent_builder=self.agent_builder,
+            verbose=verbose
         )
         
-        self._create_default_config_if_missing(
-            "worldbuilder", 
-            {
-                "role": "Pulp Fiction World Architect",
-                "goal": "Create vivid, immersive settings with appropriate atmosphere and rules",
-                "backstory": "A visionary designer who excels at crafting the perfect backdrop for pulp stories",
-                "verbose": True,
-                "allow_delegation": False
-            }
+        self.content_factory = ContentAgentFactory(
+            config_loader=self.config_loader,
+            agent_builder=self.agent_builder,
+            verbose=verbose
         )
         
-        self._create_default_config_if_missing(
-            "character_creator", 
-            {
-                "role": "Pulp Character Designer",
-                "goal": "Develop memorable, genre-appropriate characters with clear motivations",
-                "backstory": "A character specialist who understands the archetypes and psychology of pulp fiction protagonists and antagonists",
-                "verbose": True,
-                "allow_delegation": False
-            }
+        self.support_factory = SupportAgentFactory(
+            config_loader=self.config_loader,
+            agent_builder=self.agent_builder,
+            verbose=verbose
         )
-        
-        self._create_default_config_if_missing(
-            "plotter", 
-            {
-                "role": "Pulp Fiction Narrative Architect",
-                "goal": "Craft engaging plot structures with appropriate pacing and twists",
-                "backstory": "A master storyteller with expertise in pulp narrative structures and cliffhangers",
-                "verbose": True,
-                "allow_delegation": False
-            }
-        )
-        
-        self._create_default_config_if_missing(
-            "writer", 
-            {
-                "role": "Pulp Fiction Prose Specialist",
-                "goal": "Generate engaging, genre-appropriate prose that brings the story to life",
-                "backstory": "A wordsmith with a knack for capturing the distinctive voice of various pulp fiction genres",
-                "verbose": True,
-                "allow_delegation": False
-            }
-        )
-        
-        self._create_default_config_if_missing(
-            "editor", 
-            {
-                "role": "Pulp Fiction Refiner",
-                "goal": "Polish and improve the story while maintaining voice and consistency",
-                "backstory": "A detail-oriented editor with experience improving pulp fiction while preserving its essence",
-                "verbose": True,
-                "allow_delegation": False
-            }
-        )
-    
-    def _create_default_config_if_missing(self, agent_type: str, config: Dict[str, Any]):
-        """
-        Create a default configuration file if one doesn't exist.
-        
-        Args:
-            agent_type: Type of agent
-            config: Configuration to save
-        """
-        config_path = os.path.join(self.config_dir, "generic", f"{agent_type}.yaml")
-        if not os.path.exists(config_path):
-            with open(config_path, "w") as f:
-                yaml.dump(config, f, default_flow_style=False)
     
     def create_researcher(self, genre: str, config: Optional[Dict[str, Any]] = None) -> Agent:
         """
@@ -162,23 +76,7 @@ class AgentFactory:
         Returns:
             A configured researcher agent
         """
-        # Get base configuration
-        agent_config = self._get_base_config("researcher", genre)
-        
-        # Apply any overrides
-        if config:
-            agent_config.update(config)
-        
-        # Create the agent
-        return Agent(
-            role=agent_config["role"],
-            goal=agent_config["goal"],
-            backstory=agent_config["backstory"],
-            verbose=agent_config.get("verbose", self.verbose),
-            allow_delegation=agent_config.get("allow_delegation", False),
-            llm=self.crewai_model,  # Use the CrewAI-compatible adapter
-            tools=agent_config.get("tools", [])
-        )
+        return self.support_factory.create_researcher(genre, config)
     
     def create_worldbuilder(self, genre: str, config: Optional[Dict[str, Any]] = None) -> Agent:
         """
@@ -191,23 +89,7 @@ class AgentFactory:
         Returns:
             A configured worldbuilder agent
         """
-        # Get base configuration
-        agent_config = self._get_base_config("worldbuilder", genre)
-        
-        # Apply any overrides
-        if config:
-            agent_config.update(config)
-        
-        # Create the agent
-        return Agent(
-            role=agent_config["role"],
-            goal=agent_config["goal"],
-            backstory=agent_config["backstory"],
-            verbose=agent_config.get("verbose", self.verbose),
-            allow_delegation=agent_config.get("allow_delegation", False),
-            llm=self.crewai_model,  # Use the CrewAI-compatible adapter
-            tools=agent_config.get("tools", [])
-        )
+        return self.creative_factory.create_worldbuilder(genre, config)
     
     def create_character_creator(self, genre: str, config: Optional[Dict[str, Any]] = None) -> Agent:
         """
@@ -220,23 +102,7 @@ class AgentFactory:
         Returns:
             A configured character creator agent
         """
-        # Get base configuration
-        agent_config = self._get_base_config("character_creator", genre)
-        
-        # Apply any overrides
-        if config:
-            agent_config.update(config)
-        
-        # Create the agent
-        return Agent(
-            role=agent_config["role"],
-            goal=agent_config["goal"],
-            backstory=agent_config["backstory"],
-            verbose=agent_config.get("verbose", self.verbose),
-            allow_delegation=agent_config.get("allow_delegation", False),
-            llm=self.crewai_model,  # Use the CrewAI-compatible adapter
-            tools=agent_config.get("tools", [])
-        )
+        return self.creative_factory.create_character_creator(genre, config)
     
     def create_plotter(self, genre: str, config: Optional[Dict[str, Any]] = None) -> Agent:
         """
@@ -249,23 +115,7 @@ class AgentFactory:
         Returns:
             A configured plotter agent
         """
-        # Get base configuration
-        agent_config = self._get_base_config("plotter", genre)
-        
-        # Apply any overrides
-        if config:
-            agent_config.update(config)
-        
-        # Create the agent
-        return Agent(
-            role=agent_config["role"],
-            goal=agent_config["goal"],
-            backstory=agent_config["backstory"],
-            verbose=agent_config.get("verbose", self.verbose),
-            allow_delegation=agent_config.get("allow_delegation", False),
-            llm=self.crewai_model,  # Use the CrewAI-compatible adapter
-            tools=agent_config.get("tools", [])
-        )
+        return self.content_factory.create_plotter(genre, config)
     
     def create_writer(self, genre: str, config: Optional[Dict[str, Any]] = None) -> Agent:
         """
@@ -278,23 +128,7 @@ class AgentFactory:
         Returns:
             A configured writer agent
         """
-        # Get base configuration
-        agent_config = self._get_base_config("writer", genre)
-        
-        # Apply any overrides
-        if config:
-            agent_config.update(config)
-        
-        # Create the agent
-        return Agent(
-            role=agent_config["role"],
-            goal=agent_config["goal"],
-            backstory=agent_config["backstory"],
-            verbose=agent_config.get("verbose", self.verbose),
-            allow_delegation=agent_config.get("allow_delegation", False),
-            llm=self.crewai_model,  # Use the CrewAI-compatible adapter
-            tools=agent_config.get("tools", [])
-        )
+        return self.content_factory.create_writer(genre, config)
     
     def create_editor(self, genre: str, config: Optional[Dict[str, Any]] = None) -> Agent:
         """
@@ -307,23 +141,7 @@ class AgentFactory:
         Returns:
             A configured editor agent
         """
-        # Get base configuration
-        agent_config = self._get_base_config("editor", genre)
-        
-        # Apply any overrides
-        if config:
-            agent_config.update(config)
-        
-        # Create the agent
-        return Agent(
-            role=agent_config["role"],
-            goal=agent_config["goal"],
-            backstory=agent_config["backstory"],
-            verbose=agent_config.get("verbose", self.verbose),
-            allow_delegation=agent_config.get("allow_delegation", False),
-            llm=self.crewai_model,  # Use the CrewAI-compatible adapter
-            tools=agent_config.get("tools", [])
-        )
+        return self.support_factory.create_editor(genre, config)
     
     def create_agent(self, agent_type: str, genre: str, config: Optional[Dict[str, Any]] = None) -> Agent:
         """
@@ -352,35 +170,4 @@ class AgentFactory:
         if agent_type not in create_methods:
             raise ValueError(f"Unknown agent type: {agent_type}. Valid types: {', '.join(create_methods.keys())}")
             
-        return create_methods[agent_type](genre, config)
-    
-    def _get_base_config(self, agent_type: str, genre: str) -> Dict[str, Any]:
-        """
-        Get the base configuration for an agent.
-        
-        Args:
-            agent_type: Type of agent
-            genre: Genre for the agent
-            
-        Returns:
-            Dictionary with the agent's base configuration
-            
-        Raises:
-            ValueError: If the configuration file is not found
-        """
-        # Try to find a genre-specific configuration
-        genre_config_path = os.path.join(self.config_dir, genre, f"{agent_type}.yaml")
-        
-        # Fall back to a generic configuration if genre-specific not found
-        generic_config_path = os.path.join(self.config_dir, "generic", f"{agent_type}.yaml")
-        
-        config_path = genre_config_path if os.path.exists(genre_config_path) else generic_config_path
-        
-        if not os.path.exists(config_path):
-            raise ValueError(f"Cannot find configuration for {agent_type} in genre {genre}")
-            
-        # Load the configuration
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-            
-        return config 
+        return create_methods[agent_type](genre, config) 
