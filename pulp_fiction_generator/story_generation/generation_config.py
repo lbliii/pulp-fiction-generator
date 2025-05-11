@@ -29,6 +29,7 @@ class GenerationConfig:
         use_flow: bool = False,
         plot_flow: bool = False,
         output_format: str = "plain",
+        interactive_display: bool = False,
     ):
         """Initialize generation configuration"""
         self.genre = genre
@@ -50,4 +51,5 @@ class GenerationConfig:
         self.ollama_batch_size = ollama_batch_size
         self.use_flow = use_flow
         self.plot_flow = plot_flow
-        self.output_format = output_format 
+        self.output_format = output_format
+        self.interactive_display = interactive_display 

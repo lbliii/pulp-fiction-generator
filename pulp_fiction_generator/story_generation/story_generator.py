@@ -4,7 +4,7 @@ StoryGenerator module responsible for generating stories.
 
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List, Callable, Tuple
 from dataclasses import dataclass
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -17,6 +17,10 @@ from ..plots import plot_registry
 from ..utils.story_persistence import StoryPersistence
 from ..story_model.state import StoryStateManager
 from .generation_config import GenerationConfig
+
+# Type definitions for callback functions
+ProgressCallback = Callable[[str, int, str], None]  # stage, percent, status
+ChunkCallback = Callable[[str, str], None]  # chunk_type, content
 
 @dataclass
 class GenerationResult:
@@ -59,6 +63,34 @@ class StoryGenerator:
         self.progress_display = None
         self.execution_task = None
         
+        # Callback registrations
+        self.progress_callbacks: List[ProgressCallback] = []
+        self.chunk_callbacks: List[ChunkCallback] = []
+        
+    def register_progress_callback(self, callback: ProgressCallback) -> None:
+        """Register a callback for progress updates"""
+        self.progress_callbacks.append(callback)
+        
+    def register_chunk_callback(self, callback: ChunkCallback) -> None:
+        """Register a callback for content chunk updates"""
+        self.chunk_callbacks.append(callback)
+        
+    def _notify_progress(self, stage: str, percent: int, status: str) -> None:
+        """Notify all registered progress callbacks"""
+        for callback in self.progress_callbacks:
+            try:
+                callback(stage, percent, status)
+            except Exception as e:
+                print(f"Error in progress callback: {e}")
+                
+    def _notify_chunk(self, chunk_type: str, content: str) -> None:
+        """Notify all registered chunk callbacks"""
+        for callback in self.chunk_callbacks:
+            try:
+                callback(chunk_type, content)
+            except Exception as e:
+                print(f"Error in chunk callback: {e}")
+
     def _initialize_model(self) -> OllamaAdapter:
         """Initialize the Ollama model adapter"""
         return OllamaAdapter.from_env(
@@ -131,6 +163,7 @@ class StoryGenerator:
         """Set up event listeners for progress and token tracking"""
         # Progress callback for CrewAI events
         def progress_callback(completed_tasks, total_tasks, progress, remaining):
+            # Update local progress tracking
             if self.progress_display and self.execution_task:
                 # Update progress bar
                 if progress is not None:
@@ -162,17 +195,27 @@ class StoryGenerator:
                             time_str = f"{minutes}m {seconds}s"
                         
                         # Format progress description with detailed metrics
+                        status_text = f"Task {completed_tasks}/{total_tasks} ({progress:.1f}%), ~{time_str} remaining"
                         self.progress_display.update(
                             self.execution_task, 
-                            description=f"Generating story... Task {completed_tasks}/{total_tasks} ({progress:.1f}%), ~{time_str} remaining",
+                            description=f"Generating story... {status_text}",
                             completed=int(progress)
                         )
+                        
+                        # Notify external progress listeners
+                        stage = "generation"
+                        self._notify_progress(stage, int(progress), status_text)
                     else:
+                        status_text = f"Task {completed_tasks}/{total_tasks} ({progress:.1f}%)"
                         self.progress_display.update(
                             self.execution_task, 
-                            description=f"Generating story... Task {completed_tasks}/{total_tasks} ({progress:.1f}%)",
+                            description=f"Generating story... {status_text}",
                             completed=int(progress)
                         )
+                        
+                        # Notify external progress listeners
+                        stage = "initialization"
+                        self._notify_progress(stage, int(progress), status_text)
         
         # Token tracking callback for CrewAI events
         def token_callback(source, event):
@@ -187,10 +230,15 @@ class StoryGenerator:
                 if self.progress_display and self.execution_task:
                     # Only update description if significant change in tokens to avoid flickering
                     if self.token_count % 50 == 0:
+                        status_text = f"{self.token_count:,} tokens ({tokens_per_minute:.1f} tokens/min)"
                         self.progress_display.update(
                             self.execution_task,
-                            description=f"Generating story... {self.token_count:,} tokens ({tokens_per_minute:.1f} tokens/min)"
+                            description=f"Generating story... {status_text}"
                         )
+                        
+                        # Notify external progress listeners of token stats
+                        stage = "tokens"
+                        self._notify_progress(stage, 0, status_text)
         
         # Register event listeners
         progress_listener = self.crew_executor.create_custom_event_listener(callback=progress_callback)
@@ -198,19 +246,42 @@ class StoryGenerator:
     
     def _generate_chunked(self) -> GenerationResult:
         """Generate a story using the chunked method"""
-        print(f"Generating {self.config.genre} story using chunked method...")
+        # Notify that we're starting chunked generation
+        self._notify_progress("chunked_generation", 0, "Starting chunked generation process")
         
-        # Define a callback for chunked progress updates
         def chunk_callback(stage, result):
             # Update the progress display with the current stage
             if self.progress_display and self.execution_task:
                 self.progress_display.update(
                     self.execution_task, 
-                    description=f"Generating {stage}..."
+                    description=f"Generating story... {stage}"
                 )
-            if self.config.verbose and result:
-                print(f"Completed {stage}")
-        
+            
+            # Notify progress callbacks
+            self._notify_progress("chunk", 0, stage)
+            
+            # If this is a planning or content chunk, notify content callbacks
+            if stage.startswith("Planning"):
+                self._notify_chunk("planning", result)
+            elif stage.startswith("Chapter"):
+                self._notify_chunk("chapter_title", stage)
+                
+                # Split content into paragraphs and notify for each
+                paragraphs = result.split("\n\n")
+                for para in paragraphs:
+                    if para.strip():
+                        self._notify_chunk("paragraph", para.strip())
+            
+            # Update the story state with the chunk
+            if "content" in result:
+                self.story_state.add_chapter(result["content"])
+                
+                # Save checkpoint
+                self.story_persistence.save_story(
+                    self.story_state, 
+                    f"{self.story_state.get_project_dirname()}_checkpoint"
+                )
+                
         try:
             custom_inputs = self._prepare_custom_inputs()
             

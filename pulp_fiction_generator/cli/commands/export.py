@@ -4,17 +4,17 @@ Export commands for Pulp Fiction Generator.
 
 import os
 import typer
-import shutil
-import markdown
-from typing import List, Optional
 from enum import Enum
 from pathlib import Path
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress
+from typing import List, Optional
 
 from ..base import BaseCommand
 from ...utils.story_persistence import StoryPersistence
 from ...utils.errors import logger
+from ...exporters.factory import ExporterFactory
+from ...exporters.exceptions import ExporterDependencyError
 
 # Create a Typer app for export commands
 export_app = typer.Typer(help="Export stories in various formats")
@@ -28,282 +28,8 @@ class OutputFormat(str, Enum):
     pdf = "pdf"
     docx = "docx"
     epub = "epub"
+    terminal = "terminal"
     all = "all"
-
-def get_exporter_for_format(output_format: str):
-    """Get the appropriate exporter function for a format."""
-    exporters = {
-        "plain": export_plain,
-        "md": export_markdown,
-        "markdown": export_markdown,
-        "html": export_html,
-        "pdf": export_pdf,
-        "docx": export_docx,
-        "epub": export_epub,
-    }
-    return exporters.get(output_format.lower())
-
-
-def export_plain(content: str, output_path: str) -> str:
-    """Export content as plain text."""
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(content)
-    return output_path
-
-
-def export_markdown(content: str, output_path: str) -> str:
-    """Export content as markdown."""
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(content)
-    return output_path
-
-
-def export_html(content: str, output_path: str) -> str:
-    """Export content as HTML."""
-    try:
-        html_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generated Story</title>
-    <style>
-        body {{
-            font-family: Georgia, serif;
-            line-height: 1.6;
-            margin: 0 auto;
-            max-width: 800px;
-            padding: 2rem;
-            color: #333;
-        }}
-        h1, h2, h3, h4, h5, h6 {{
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            margin-top: 2rem;
-        }}
-        h1 {{
-            text-align: center;
-            margin-bottom: 2rem;
-            font-size: 2.5rem;
-            border-bottom: 2px solid #333;
-            padding-bottom: 0.5rem;
-        }}
-        p {{
-            margin-bottom: 1.2rem;
-            text-align: justify;
-        }}
-        blockquote {{
-            font-style: italic;
-            border-left: 4px solid #ccc;
-            padding-left: 1rem;
-            margin-left: 0;
-        }}
-        @media (max-width: 600px) {{
-            body {{
-                padding: 1rem;
-            }}
-            h1 {{
-                font-size: 2rem;
-            }}
-        }}
-    </style>
-</head>
-<body>
-    {markdown.markdown(content)}
-</body>
-</html>
-        """
-        
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        return output_path
-    except Exception as e:
-        logger.error(f"Error exporting to HTML: {e}")
-        raise
-
-
-def export_pdf(content: str, output_path: str) -> str:
-    """Export content as PDF."""
-    try:
-        # First convert to HTML
-        html_path = output_path.replace(".pdf", ".html")
-        export_html(content, html_path)
-        
-        # Then use weasyprint to convert HTML to PDF
-        try:
-            from weasyprint import HTML
-            HTML(html_path).write_pdf(output_path)
-            
-            # Remove temporary HTML file
-            os.remove(html_path)
-            return output_path
-        except ImportError:
-            console.print("[yellow]WeasyPrint not installed. Falling back to alternative PDF export.[/yellow]")
-            
-            # Try alternative PDF export with pdfkit
-            try:
-                import pdfkit
-                pdfkit.from_file(html_path, output_path)
-                
-                # Remove temporary HTML file
-                os.remove(html_path)
-                return output_path
-            except ImportError:
-                console.print("[yellow]pdfkit not installed. Cannot export to PDF.[/yellow]")
-                console.print("[yellow]Install with: pip install pdfkit[/yellow]")
-                raise ImportError("No PDF export library available")
-    except Exception as e:
-        logger.error(f"Error exporting to PDF: {e}")
-        raise
-
-
-def export_docx(content: str, output_path: str) -> str:
-    """Export content as DOCX."""
-    try:
-        from docx import Document
-        from docx.shared import Inches
-        
-        document = Document()
-        
-        # Extract title from the content (first line)
-        lines = content.strip().split("\n")
-        title = lines[0].replace("#", "").strip() if lines and lines[0].startswith("#") else "Generated Story"
-        
-        # Add title
-        document.add_heading(title, 0)
-        
-        # Process content by paragraphs
-        current_para = ""
-        in_heading = False
-        
-        for line in lines[1:]:
-            # Skip the title line
-            if line.strip() == "" and current_para:
-                # End of paragraph
-                document.add_paragraph(current_para)
-                current_para = ""
-            elif line.startswith("#"):
-                # This is a heading
-                if current_para:
-                    document.add_paragraph(current_para)
-                    current_para = ""
-                
-                # Add the heading (count # to determine level)
-                level = 0
-                heading_text = line.strip()
-                while heading_text.startswith("#"):
-                    level += 1
-                    heading_text = heading_text[1:]
-                
-                # Cap at level 9 (docx only supports up to 9)
-                level = min(level, 9)
-                document.add_heading(heading_text.strip(), level)
-            else:
-                # Regular paragraph text
-                if current_para:
-                    current_para += " " + line.strip()
-                else:
-                    current_para = line.strip()
-        
-        # Add the last paragraph if any
-        if current_para:
-            document.add_paragraph(current_para)
-        
-        # Save the document
-        document.save(output_path)
-        return output_path
-    except ImportError:
-        console.print("[yellow]python-docx not installed. Cannot export to DOCX.[/yellow]")
-        console.print("[yellow]Install with: pip install python-docx[/yellow]")
-        raise ImportError("python-docx not available")
-    except Exception as e:
-        logger.error(f"Error exporting to DOCX: {e}")
-        raise
-
-
-def export_epub(content: str, output_path: str) -> str:
-    """Export content as EPUB."""
-    try:
-        from ebooklib import epub
-        
-        # Extract title from the content (first line)
-        lines = content.strip().split("\n")
-        title = lines[0].replace("#", "").strip() if lines and lines[0].startswith("#") else "Generated Story"
-        
-        # Create new EPUB book
-        book = epub.EpubBook()
-        
-        # Set metadata
-        book.set_title(title)
-        book.set_language('en')
-        book.add_author('Pulp Fiction Generator')
-        
-        # Create chapter
-        chapter = epub.EpubHtml(title=title, file_name='story.xhtml')
-        chapter.content = markdown.markdown(content)
-        
-        # Add chapter to book
-        book.add_item(chapter)
-        
-        # Create TOC
-        book.toc = (epub.Link('story.xhtml', title, title),)
-        
-        # Add default NCX and Nav files
-        book.add_item(epub.EpubNcx())
-        book.add_item(epub.EpubNav())
-        
-        # Define CSS
-        style = '''
-            body {
-                font-family: Georgia, serif;
-                line-height: 1.6;
-                margin: 1em;
-                color: #333;
-            }
-            h1, h2, h3, h4, h5, h6 {
-                font-family: Arial, sans-serif;
-                margin-top: 1.5em;
-            }
-            h1 {
-                text-align: center;
-                margin-bottom: 1.5em;
-                font-size: 2em;
-                border-bottom: 1px solid #333;
-                padding-bottom: 0.5em;
-            }
-            p {
-                margin-bottom: 1em;
-                text-align: justify;
-            }
-            blockquote {
-                font-style: italic;
-                border-left: 2px solid #ccc;
-                padding-left: 1em;
-                margin-left: 0;
-            }
-        '''
-        
-        # Add CSS file
-        nav_css = epub.EpubItem(
-            uid="style_nav",
-            file_name="style/nav.css",
-            media_type="text/css",
-            content=style
-        )
-        book.add_item(nav_css)
-        
-        # Create spine
-        book.spine = ['nav', chapter]
-        
-        # Write to file
-        epub.write_epub(output_path, book, {})
-        return output_path
-    except ImportError:
-        console.print("[yellow]EbookLib not installed. Cannot export to EPUB.[/yellow]")
-        console.print("[yellow]Install with: pip install ebooklib markdown[/yellow]")
-        raise ImportError("EbookLib not available")
-    except Exception as e:
-        logger.error(f"Error exporting to EPUB: {e}")
-        raise
 
 
 @export_app.command("story")
@@ -375,17 +101,17 @@ def export_story_cmd(
                 progress.update(task, description=f"[green]Exporting to {fmt}...")
                 output_file = output_path / f"{project}.{fmt}"
                 
-                # Get the exporter function
-                exporter = get_exporter_for_format(fmt)
+                # Get exporter from factory
+                exporter = ExporterFactory.create_exporter(fmt)
                 if not exporter:
                     console.print(f"[yellow]No exporter available for format: {fmt}[/yellow]")
                     continue
                 
                 # Export the content
-                result_path = exporter(content, str(output_file))
+                result_path = exporter.export(content, str(output_file))
                 console.print(f"[green]Exported to {fmt}: {result_path}[/green]")
                 
-            except ImportError as e:
+            except ExporterDependencyError as e:
                 console.print(f"[yellow]Missing dependency for {fmt} format: {e}[/yellow]")
                 continue
             except Exception as e:
@@ -501,16 +227,16 @@ def bulk_export_cmd(
                     try:
                         output_file = project_dir / f"{project}.{fmt}"
                         
-                        # Get the exporter function
-                        exporter = get_exporter_for_format(fmt)
+                        # Get exporter from factory
+                        exporter = ExporterFactory.create_exporter(fmt)
                         if not exporter:
                             console.print(f"[yellow]No exporter available for format: {fmt}[/yellow]")
                             continue
                         
                         # Export the content
-                        exporter(content, str(output_file))
+                        exporter.export(content, str(output_file))
                         
-                    except ImportError:
+                    except ExporterDependencyError:
                         # Skip formats with missing dependencies in bulk mode
                         continue
                     except Exception as e:
@@ -599,11 +325,11 @@ class ExportCommand(BaseCommand):
                 for fmt in formats:
                     try:
                         fmt_output = f"{output_base}.{fmt}"
-                        exporter = get_exporter_for_format(fmt)
+                        exporter = ExporterFactory.create_exporter(fmt)
                         if exporter:
-                            exporter(content, fmt_output)
+                            exporter.export(content, fmt_output)
                             cls.info(f"Exported to {fmt}: {fmt_output}")
-                    except ImportError:
+                    except ExporterDependencyError:
                         cls.warning(f"Missing dependency for {fmt} format")
                     except Exception as e:
                         cls.warning(f"Error exporting to {fmt}: {str(e)}")
@@ -611,15 +337,15 @@ class ExportCommand(BaseCommand):
                 cls.success("Export complete!")
             else:
                 # Export to a single format
-                exporter = get_exporter_for_format(format.lower())
+                exporter = ExporterFactory.create_exporter(format.lower())
                 if not exporter:
                     cls.error(f"Unsupported format: {format}")
                     return
                 
-                result_path = exporter(content, output_file)
+                result_path = exporter.export(content, output_file)
                 cls.success(f"Exported to {format}: {result_path}")
         
-        except ImportError as e:
+        except ExporterDependencyError as e:
             cls.error(f"Missing dependency: {e}")
         except Exception as e:
             cls.error(f"Export error: {str(e)}") 

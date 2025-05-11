@@ -8,6 +8,9 @@ from typing import Optional, List, Tuple, Any
 import typer
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.align import Align
+from rich.progress import Progress, TextColumn, BarColumn, SpinnerColumn, TimeElapsedColumn
 
 from ..base import GenerateCommand
 from ...agents.agent_factory import AgentFactory
@@ -93,7 +96,10 @@ class Generate(GenerateCommand):
             False, "--plot-flow", help="Generate a visualization of the flow (only used with --flow)"
         ),
         output_format: str = typer.Option(
-            "plain", "--format", case_sensitive=False, help="Output format (plain, markdown, html, pdf)"
+            "plain", "--format", case_sensitive=False, help="Output format (plain, markdown, html, pdf, terminal)"
+        ),
+        interactive_display: bool = typer.Option(
+            False, "--interactive/--no-interactive", help="Display interactive progress and story chunks during generation"
         ),
     ):
         """Generate a pulp fiction story in the specified genre"""
@@ -119,7 +125,8 @@ class Generate(GenerateCommand):
                 ollama_batch_size=ollama_batch_size,
                 use_flow=use_flow,
                 plot_flow=plot_flow,
-                output_format=output_format
+                output_format=output_format,
+                interactive_display=interactive_display
             )
             
             # Validate configuration
@@ -136,6 +143,10 @@ class Generate(GenerateCommand):
             # Check for plugin genre
             plugin_genre = cls._get_plugin_genre(config.genre, config.verbose)
             
+            # Show fancy title banner if interactive mode
+            if config.interactive_display:
+                cls._display_title_banner(config, story_state)
+                
             # Create and run the story generator
             generator = StoryGenerator(
                 config=config,
@@ -145,11 +156,48 @@ class Generate(GenerateCommand):
                 plugin_genre=plugin_genre
             )
             
+            # Register progress callbacks if in interactive mode
+            if config.interactive_display:
+                generator.register_progress_callback(cls._progress_callback)
+                generator.register_chunk_callback(cls._chunk_callback)
+                
             # Display generation plan
             cls._display_generation_plan(config, story_state)
             
             # Generate the story
-            result = generator.generate()
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]{task.description}"),
+                BarColumn(),
+                TextColumn("[bold]{task.fields[status]}"),
+                TimeElapsedColumn(),
+                console=console,
+                transient=True if config.interactive_display else False,
+                expand=True
+            ) as progress:
+                # Create main task for tracking overall progress
+                main_task_id = progress.add_task(
+                    f"[bold]Generating {config.genre} story...", 
+                    total=100,
+                    status="Planning story"
+                )
+                
+                # Start generation with progress update callback
+                def update_progress(stage, percent, status):
+                    progress.update(
+                        main_task_id, 
+                        completed=percent,
+                        status=status
+                    )
+                
+                # Configure the callbacks
+                generator.register_progress_callback(update_progress)
+                
+                # Generate the story
+                result = generator.generate()
+                
+                # Complete the progress bar
+                progress.update(main_task_id, completed=100, status="Complete!")
             
             # Handle the generation result
             cls._handle_generation_result(
@@ -330,4 +378,61 @@ class Generate(GenerateCommand):
         saved_file_path = story_persistence.save_story(story_state)
         saved_file_name = os.path.basename(saved_file_path)
         console.print(f"[dim]Or using the specific story file:[/dim]")
-        console.print(f"[cyan]pulp-fiction generate --continue {saved_file_name} --chapters 1[/cyan]") 
+        console.print(f"[cyan]pulp-fiction generate --continue {saved_file_name} --chapters 1[/cyan]")
+    
+    @classmethod
+    def _display_title_banner(cls, config, story_state):
+        """Display a fancy title banner for the story generation"""
+        if story_state and story_state.metadata.title:
+            title = story_state.metadata.title
+        else:
+            title = config.title or f"New {config.genre.capitalize()} Story"
+            
+        genre = config.genre.upper()
+        
+        # Create a fancy banner
+        banner = Panel(
+            Align.center(
+                f"[bold red]{title}[/bold red]\n\n"
+                f"[yellow]Genre:[/yellow] [bold yellow]{genre}[/bold yellow]\n"
+                f"[blue]Chapters:[/blue] [bold blue]{config.chapters}[/bold blue]\n"
+                f"[green]Model:[/green] [bold green]{config.model}[/bold green]"
+            ),
+            border_style="red",
+            title="[bold]PULP FICTION GENERATOR[/bold]",
+            subtitle="[italic]Creating your story...[/italic]"
+        )
+        
+        console.print("\n")
+        console.print(Align.center(banner))
+        console.print("\n")
+    
+    @classmethod
+    def _progress_callback(cls, stage, percent, status):
+        """Progress callback for interactive mode"""
+        # The actual progress tracking is handled by the Progress context manager
+        pass
+    
+    @classmethod
+    def _chunk_callback(cls, chunk_type, chunk_content):
+        """Callback for displaying generated content chunks in real-time"""
+        if chunk_type == "chapter_title":
+            console.print("\n")
+            console.print(Panel(
+                Align.center(f"[bold yellow]{chunk_content}[/bold yellow]"),
+                border_style="yellow",
+                expand=False
+            ))
+            console.print("\n")
+        elif chunk_type == "paragraph":
+            # Display new paragraphs as they're generated
+            console.print(Markdown(chunk_content))
+            console.print("\n")
+        elif chunk_type == "planning":
+            # Display planning notes in a subtle panel
+            console.print(Panel(
+                Markdown(chunk_content),
+                border_style="dim blue",
+                title="[bold blue]Planning[/bold blue]",
+                expand=False
+            )) 
