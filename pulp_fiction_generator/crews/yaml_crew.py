@@ -201,128 +201,127 @@ class StoryGenerationCrew:
     @crew
     def build(self) -> Crew:
         """Build the crew with all components."""
-        # Get process type from config
-        process_type = self.config.get("process", "sequential")
+        # Get the configured agents
+        agents = self.get_agents()
         
-        # Convert string to Process enum
-        try:
-            process = get_process_from_string(process_type)
-        except ValueError as e:
-            logger.warning(f"Invalid process type '{process_type}': {e}. Falling back to sequential.")
-            process = Process.sequential
+        # Get the configured tasks
+        tasks = self.get_tasks(agents)
         
-        # Validate process configuration
-        is_valid, error_message = validate_process_config(process, self.config)
-        if not is_valid:
-            logger.warning(f"Invalid process configuration: {error_message}. Falling back to sequential.")
-            process = Process.sequential
+        # Get configured process
+        process = self.get_process()
         
-        # Log the process being used
-        logger.info(f"Using {process} process: {get_process_description(process)}")
-        
-        # Get memory configuration from config
+        # Check if memory is enabled
         memory_enabled = self.config.get("memory", True)
         
-        # Get detailed memory configuration from config or use defaults
-        memory_config = self.config.get("memory_config", {"provider": "local"})
+        # Get memory configuration
+        memory_config = {
+            "memory_retriever": self.config.get("memory_retriever"),
+            "auto_embedding": self.config.get("auto_embedding", True),
+            "memory_window": self.config.get("memory_window", 10)
+        }
         
-        # Enhanced memory configuration
-        from crewai.memory import LongTermMemory, ShortTermMemory, EntityMemory
-        from crewai.memory.storage.rag_storage import RAGStorage
-        from crewai.memory.storage.ltm_sqlite_storage import LTMSQLiteStorage
-        import os
+        # Get event listeners
+        event_listeners = self.config.get("event_listeners", get_default_listeners())
         
-        # Set up storage directory - use config setting if available, or default to .memory
-        storage_dir = self.config.get("memory_storage_dir", "./.memory")
-        os.makedirs(storage_dir, exist_ok=True)
-        
-        # Set up base path for memory components
-        base_path = os.path.join(storage_dir, self.genre.lower().replace(" ", "_"))
-        os.makedirs(base_path, exist_ok=True)
-        
-        # Configure embeddings
-        default_embedder = {"provider": "openai", "config": {"model": "text-embedding-3-small"}}
-        embedder_config = self.config.get("embedder", default_embedder)
-        
-        # Create memory components if enabled
-        long_term_memory = None
-        short_term_memory = None
-        entity_memory = None
-        
-        if memory_enabled:
-            # Configure long-term memory
-            if self.config.get("long_term_memory_enabled", True):
-                ltm_path = os.path.join(base_path, "long_term_memory.db")
-                long_term_memory = LongTermMemory(
-                    storage=LTMSQLiteStorage(db_path=ltm_path)
-                )
-            
-            # Configure short-term memory with RAG
-            if self.config.get("short_term_memory_enabled", True):
-                short_term_memory = ShortTermMemory(
-                    storage=RAGStorage(
-                        embedder_config=embedder_config,
-                        type="short_term",
-                        path=base_path
-                    )
-                )
-            
-            # Configure entity memory with RAG
-            if self.config.get("entity_memory_enabled", True):
-                entity_memory = EntityMemory(
-                    storage=RAGStorage(
-                        embedder_config=embedder_config,
-                        type="entity",
-                        path=base_path
-                    )
-                )
-        
-        # Configure function calling LLM if needed
+        # Get function calling LLM
         function_calling_llm = None
         if self.config.get("use_function_calling_llm", True):
             function_calling_llm = self.model_service.get_function_calling_llm()
-            
-        # Determine if we need a manager agent
+        
+        # Get manager agent if specified
         manager_agent = None
-        if process == Process.hierarchical:
-            manager_agent = self.manager()
+        if self.config.get("manager_agent"):
+            manager_agent = agents.get(self.config.get("manager_agent"))
             
-        # Get event listeners
-        event_listeners = []
-        if self.config.get("use_event_listeners", True):
-            # Handle both dictionary and list format for event_listeners in config
-            config_listeners = self.config.get("event_listeners", {})
-            if isinstance(config_listeners, dict) and "listeners" in config_listeners:
-                event_listeners = config_listeners["listeners"]
-            elif isinstance(config_listeners, list):
-                event_listeners = config_listeners
-            else:
-                # Use default listeners as a fallback
-                event_listeners = get_default_listeners()
+        # Get embedder configuration
+        embedder_config = self.config.get("embedder")
+        
+        # Check for enhanced memory components
+        long_term_memory = self.config.get("long_term_memory")
+        short_term_memory = self.config.get("short_term_memory")
+        entity_memory = self.config.get("entity_memory")
+        
+        # Configure specialized LLMs based on phase
+        planning_llm = None
+        if self.config.get("enable_planning", True):
+            planning_llm = self.model_service.get_planning_llm()
+        
+        # Use specialized LLMs for different phases of story generation
+        worldbuilding_llm = None 
+        if self.genre in ["fantasy", "scifi", "adventure"]:
+            worldbuilding_llm = self.model_service.get_worldbuilding_llm()
             
-        # Build tasks list (the order matters for sequential process)
-        tasks = [
-            self.research_task(),
-            self.worldbuilding_task(),
-            self.character_task(),
-            self.plot_task(),
-            self.writing_task(),
-            self.editing_task()
-        ]
+        # Create a streaming LLM for longer outputs if supported
+        streaming_llm = None
+        if self.config.get("use_streaming", True):
+            try:
+                streaming_llm = self.model_service.get_streaming_llm()
+            except Exception as e:
+                logger.warning(f"Failed to create streaming LLM: {e}")
+                
+        # For outline phase, use structured output
+        outline_llm = None
+        if "outline" in self.config.get("enabled_phases", []):
+            try:
+                outline_llm = self.model_service.get_story_outline_llm()
+            except Exception as e:
+                logger.warning(f"Failed to create outline LLM: {e}")
+                
+        # For feedback or editing phases, use feedback LLM
+        feedback_llm = None 
+        if "feedback" in self.config.get("enabled_phases", []) or "editing" in self.config.get("enabled_phases", []):
+            try:
+                feedback_llm = self.model_service.get_feedback_llm()
+            except Exception as e:
+                logger.warning(f"Failed to create feedback LLM: {e}")
         
-        # Build agents list
-        agents = [
-            self.researcher(),
-            self.worldbuilder(),
-            self.character_creator(),
-            self.plotter(),
-            self.writer(),
-            self.editor()
-        ]
+        # For creative writing, use the creative LLM
+        creative_llm = None
+        if "creative" in self.config.get("enabled_phases", []) or "draft" in self.config.get("enabled_phases", []):
+            try:
+                creative_llm = self.model_service.get_creative_llm()
+            except Exception as e:
+                logger.warning(f"Failed to create creative LLM: {e}")
         
-        # Add manager to agents if using hierarchical process
-        if process == Process.hierarchical and manager_agent:
-            agents.append(manager_agent)
+        # For historical research, use historical analysis LLM
+        historical_llm = None
+        if "research" in self.config.get("enabled_phases", []) and self.genre in ["western", "noir", "historical"]:
+            try:
+                historical_llm = self.model_service.get_historical_analysis_llm()
+            except Exception as e:
+                logger.warning(f"Failed to create historical LLM: {e}")
+                
+        # Add all specialized LLMs to a dictionary
+        specialized_llms = {
+            "planning_llm": planning_llm,
+            "worldbuilding_llm": worldbuilding_llm,
+            "streaming_llm": streaming_llm,
+            "outline_llm": outline_llm,
+            "feedback_llm": feedback_llm,
+            "creative_llm": creative_llm,
+            "historical_llm": historical_llm
+        }
+        
+        # Filter out None values
+        specialized_llms = {k: v for k, v in specialized_llms.items() if v is not None}
+        
+        # Add specialized LLMs to the config for access in tasks
+        for task in tasks:
+            # Identify task phase from its description or ID
+            task_id = getattr(task, "id", "")
+            task_desc = getattr(task, "description", "")
+            
+            # Assign appropriate LLM based on the task
+            if "outline" in task_id.lower() or "outline" in task_desc.lower():
+                task.llm = outline_llm or task.llm
+            elif "worldbuilding" in task_id.lower() or "worldbuilding" in task_desc.lower():
+                task.llm = worldbuilding_llm or task.llm
+            elif "draft" in task_id.lower() or "writing" in task_desc.lower():
+                task.llm = creative_llm or streaming_llm or task.llm
+            elif "feedback" in task_id.lower() or "feedback" in task_desc.lower():
+                task.llm = feedback_llm or task.llm
+            elif "research" in task_id.lower() or "research" in task_desc.lower():
+                task.llm = historical_llm or task.llm
             
         # Build and return the crew
         return Crew(
@@ -338,7 +337,7 @@ class StoryGenerationCrew:
             step_callback=self.config.get("step_callback"),
             task_callback=self.config.get("task_callback"),
             planning=self.config.get("enable_planning", True),
-            planning_llm=self.model_service.get_planning_llm() if self.config.get("enable_planning", True) else None,
+            planning_llm=planning_llm,
             callbacks=event_listeners,
             function_calling_llm=function_calling_llm,
             manager_agent=manager_agent,
@@ -347,5 +346,7 @@ class StoryGenerationCrew:
             # Enhanced memory components
             long_term_memory=long_term_memory,
             short_term_memory=short_term_memory,
-            entity_memory=entity_memory
+            entity_memory=entity_memory,
+            # Add specialized LLMs to the crew context for access in tasks
+            context={"specialized_llms": specialized_llms}
         ) 

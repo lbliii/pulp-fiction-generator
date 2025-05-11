@@ -338,4 +338,121 @@ class ConcreteModelService(ModelService):
         }
         
         # Create and return the LLM instance
-        return self.adapter.get_llm(**function_config) 
+        return self.adapter.get_llm(**function_config)
+    
+    def get_story_outline_llm(self):
+        """
+        Get an LLM instance optimized for generating structured story outlines.
+        
+        Returns:
+            An LLM instance configured for generating story outlines
+        """
+        from ..models.schema import StoryOutline
+        
+        # Configure story outline specific parameters
+        outline_config = {
+            "model": self.default_model_name,
+            "temperature": 0.7,  # Moderate temperature for creativity with consistency
+            "max_tokens": 2500,  # Generous token limit for detailed outlines
+            "response_format": StoryOutline,  # Use the StoryOutline Pydantic model
+        }
+        
+        # Create and return the LLM instance
+        return self.adapter.get_llm(**outline_config)
+    
+    def get_worldbuilding_llm(self):
+        """
+        Get an LLM instance optimized for worldbuilding with structured output.
+        
+        Returns:
+            An LLM instance configured for worldbuilding
+        """
+        from ..models.schema import WorldBuildingSchema
+        
+        # Configure worldbuilding specific parameters
+        worldbuilding_config = {
+            "model": self.default_model_name,
+            "temperature": 0.75,  # Higher temperature for more creative worldbuilding
+            "max_tokens": 3000,  # Large token limit for detailed world descriptions
+            "response_format": WorldBuildingSchema,  # Use the WorldBuildingSchema Pydantic model
+        }
+        
+        # Create and return the LLM instance
+        return self.adapter.get_llm(**worldbuilding_config)
+    
+    def get_creative_llm(self):
+        """
+        Get an LLM instance optimized for creative generation.
+        
+        Returns:
+            An LLM instance configured for creative content
+        """
+        # Configure creative generation specific parameters
+        creative_config = {
+            "model": self.default_model_name,
+            "temperature": 0.8,  # Higher temperature for more creative outputs
+            "max_tokens": 2000,  # Reasonable token limit for creative content
+            "top_p": 0.9,  # Nucleus sampling for more diverse outputs
+            "frequency_penalty": 0.5,  # Reduce repetition
+            "presence_penalty": 0.5,  # Encourage diverse topics
+        }
+        
+        # Create and return the LLM instance
+        return self.adapter.get_llm(**creative_config)
+    
+    def get_streaming_llm(self):
+        """
+        Get an LLM instance configured for streaming responses.
+        
+        Returns:
+            An LLM instance with streaming enabled
+        """
+        # Configure streaming specific parameters
+        streaming_config = {
+            "model": self.default_model_name,
+            "temperature": 0.7,  # Moderate temperature for general use
+            "stream": True,  # Enable streaming
+        }
+        
+        # Create and return the LLM instance
+        return self.adapter.get_llm(**streaming_config)
+    
+    def get_historical_analysis_llm(self):
+        """
+        Get an LLM instance optimized for historical analysis with structured output.
+        
+        Returns:
+            An LLM instance configured for historical analysis
+        """
+        from ..models.schema import DateLocaleAnalysis
+        
+        # Configure historical analysis specific parameters
+        history_config = {
+            "model": self.default_model_name,
+            "temperature": 0.3,  # Lower temperature for more factual outputs
+            "max_tokens": 2000,  # Reasonable token limit for analysis
+            "response_format": DateLocaleAnalysis,  # Use the DateLocaleAnalysis Pydantic model
+        }
+        
+        # Create and return the LLM instance
+        return self.adapter.get_llm(**history_config)
+    
+    def get_feedback_llm(self):
+        """
+        Get an LLM instance optimized for providing structured feedback.
+        
+        Returns:
+            An LLM instance configured for feedback
+        """
+        from ..models.schema import StoryFeedback
+        
+        # Configure feedback specific parameters
+        feedback_config = {
+            "model": self.default_model_name,
+            "temperature": 0.4,  # Moderate-low temperature for balanced feedback
+            "max_tokens": 1500,  # Reasonable token limit for feedback
+            "response_format": StoryFeedback,  # Use the StoryFeedback Pydantic model
+        }
+        
+        # Create and return the LLM instance
+        return self.adapter.get_llm(**feedback_config) 

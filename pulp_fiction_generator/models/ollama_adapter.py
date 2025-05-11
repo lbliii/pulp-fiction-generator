@@ -132,141 +132,231 @@ class OllamaAdapter(ModelService):
         """
         return config.get_ollama_params()
     
-    def generate(self, prompt: str, parameters: Optional[Dict[str, Any]] = None, stream: bool = False) -> Union[str, Iterator[str]]:
+    def generate(self, messages, **kwargs):
         """
-        Generate text from a prompt using Ollama's generate endpoint.
+        Generate a response for the given messages.
         
         Args:
-            prompt: The input text to generate from
-            parameters: Optional generation parameters
-            stream: Whether to stream the response
+            messages: List of message dictionaries with 'role' and 'content'
+            **kwargs: Additional parameters to pass to the model
             
         Returns:
-            If stream=False: The complete generated text as a string
-            If stream=True: An iterator yielding chunks of generated text
-            
-        Raises:
-            ConnectionError: If connection to Ollama API fails
-            ValueError: If the parameters are invalid
-            RuntimeError: If the Ollama API returns an error response
+            The generated text response
         """
-        generate_url = f"{self.api_base}/api/generate"
+        # Extract system message if present
+        system_content = None
+        prompt_messages = []
         
-        # Prepare the request payload
-        payload = {
+        for message in messages:
+            if message.get("role") == "system":
+                system_content = message.get("content", "")
+            else:
+                prompt_messages.append(message)
+        
+        # Format the conversation for Ollama
+        formatted_prompt = self._format_messages(prompt_messages)
+        
+        # Get parameters
+        stream = kwargs.get("stream", False)
+        temperature = kwargs.get("temperature", 0.7)
+        max_tokens = kwargs.get("max_tokens", None)
+        response_format = kwargs.get("response_format", None)
+        
+        # Handle streaming separately
+        if stream:
+            return self.stream_generate(messages, **kwargs)
+        
+        # Prepare request data
+        request_data = {
             "model": self.model_name,
-            "prompt": prompt,
-            "stream": stream
+            "prompt": formatted_prompt,
+            "temperature": temperature,
+            "raw": True,  # Get raw completion without prompt
         }
         
-        # Initialize options with default parameters
-        payload["options"] = self.get_default_ollama_params()
+        # Add system prompt if provided
+        if system_content:
+            request_data["system"] = system_content
+            
+        # Add max tokens if provided
+        if max_tokens:
+            request_data["num_predict"] = max_tokens
+            
+        # Add structure format instructions if specified
+        if response_format and response_format.get("type") == "json":
+            # Enhance system prompt with JSON instructions
+            json_instruction = "\nYou must respond with valid JSON only, no other text."
+            if system_content:
+                request_data["system"] = system_content + json_instruction
+            else:
+                request_data["system"] = json_instruction
         
-        # Add any additional parameters
-        if parameters:
-            # Check for Ollama resource parameters
-            if "ollama_params" in parameters:
-                for key, value in parameters["ollama_params"].items():
-                    payload["options"][key] = value
-                # Remove the ollama_params to prevent it from being added directly
-                ollama_params = parameters.pop("ollama_params")
-            
-            # Map common parameter names to Ollama-specific options
-            param_mapping = {
-                "max_tokens": "num_predict",
-                "temperature": "temperature",
-                "top_p": "top_p",
-                "top_k": "top_k",
-                "repeat_penalty": "repeat_penalty"
-            }
-            
-            # Add mapped parameters to options
-            for param_name, ollama_name in param_mapping.items():
-                if param_name in parameters:
-                    payload["options"][ollama_name] = parameters[param_name]
-            
-            # Add remaining parameters at the top level
-            payload.update({k: v for k, v in parameters.items() 
-                          if k not in param_mapping and k not in ["model", "prompt", "stream"]})
+        # Call Ollama API
+        response = self._call_api("/api/generate", request_data)
         
-        # If streaming is enabled, return a streaming iterator
-        if stream:
-            return self._generate_stream(generate_url, payload)
+        # Extract the response text
+        return response.get("response", "")
         
-        # Otherwise, make a non-streaming request with appropriate error handling
-        try:
-            response = requests.post(
-                generate_url, 
-                json=payload,
-                timeout=self.timeout
-            )
-            
-            # Check for errors
-            if response.status_code != 200:
-                error_message = f"Ollama API error: {response.status_code}"
-                
-                # Try to extract detailed error information
-                try:
-                    error_detail = response.json()
-                    if "error" in error_detail:
-                        error_message = f"{error_message} - {error_detail['error']}"
-                except Exception:
-                    pass
-                
-                raise RuntimeError(error_message)
-            
-            # Parse the response
-            try:
-                result = response.json()
-                return result.get("response", "")
-            except json.JSONDecodeError:
-                raise RuntimeError("Failed to decode JSON response from Ollama API")
-                
-        except requests.exceptions.Timeout:
-            raise TimeoutError(f"Request to Ollama API timed out after {self.timeout} seconds")
-        except requests.exceptions.RequestException as e:
-            raise ConnectionError(f"Error connecting to Ollama API: {str(e)}")
-    
-    def _generate_stream(self, url: str, payload: Dict[str, Any]) -> Iterator[str]:
+    def stream_generate(self, messages, **kwargs):
         """
-        Generate streaming text from Ollama API.
+        Stream a response for the given messages.
         
         Args:
-            url: The API endpoint URL
-            payload: The request payload
+            messages: List of message dictionaries with 'role' and 'content'
+            **kwargs: Additional parameters to pass to the model
             
         Yields:
-            Chunks of generated text as they become available
-            
-        Raises:
-            ConnectionError: If connection to Ollama API fails
-            RuntimeError: If the Ollama API returns an error response
+            Chunks of the generated response
         """
+        # Extract system message if present
+        system_content = None
+        prompt_messages = []
+        
+        for message in messages:
+            if message.get("role") == "system":
+                system_content = message.get("content", "")
+            else:
+                prompt_messages.append(message)
+        
+        # Format the conversation for Ollama
+        formatted_prompt = self._format_messages(prompt_messages)
+        
+        # Get parameters
+        temperature = kwargs.get("temperature", 0.7)
+        max_tokens = kwargs.get("max_tokens", None)
+        response_format = kwargs.get("response_format", None)
+        
+        # Prepare request data
+        request_data = {
+            "model": self.model_name,
+            "prompt": formatted_prompt,
+            "temperature": temperature,
+            "raw": True,  # Get raw completion without prompt
+            "stream": True  # Enable streaming
+        }
+        
+        # Add system prompt if provided
+        if system_content:
+            request_data["system"] = system_content
+            
+        # Add max tokens if provided
+        if max_tokens:
+            request_data["num_predict"] = max_tokens
+            
+        # Add structure format instructions if specified
+        if response_format and response_format.get("type") == "json":
+            # Enhance system prompt with JSON instructions
+            json_instruction = "\nYou must respond with valid JSON only, no other text."
+            if system_content:
+                request_data["system"] = system_content + json_instruction
+            else:
+                request_data["system"] = json_instruction
+        
+        # Stream from Ollama API
+        response = self._stream_api("/api/generate", request_data)
+        
+        # Process the streaming response
+        for chunk in response:
+            if "response" in chunk:
+                yield chunk["response"]
+                
+    def _stream_api(self, endpoint, data):
+        """
+        Call the Ollama API with streaming.
+        
+        Args:
+            endpoint: API endpoint
+            data: Request data
+            
+        Yields:
+            Chunks of the streaming response
+        """
+        import requests
+        import json
+        from requests.exceptions import RequestException
+        
+        url = f"{self.api_base}{endpoint}"
+        
         try:
-            with requests.post(url, json=payload, stream=True, timeout=self.timeout) as response:
+            # Make the streaming request
+            with requests.post(
+                url,
+                json=data,
+                stream=True,
+                timeout=self.timeout
+            ) as response:
                 # Check for errors
-                if response.status_code != 200:
-                    error_message = f"Ollama API error: {response.status_code}"
-                    raise RuntimeError(error_message)
+                response.raise_for_status()
                 
                 # Process the streaming response
+                buffer = ""
                 for line in response.iter_lines():
                     if line:
-                        try:
-                            chunk = json.loads(line)
-                            # Only yield the response text
-                            if "response" in chunk:
-                                yield chunk["response"]
-                                
-                            # If done is True, we can stop
-                            if chunk.get("done", False):
-                                break
-                        except json.JSONDecodeError:
-                            continue
-        except requests.exceptions.Timeout:
-            raise TimeoutError(f"Streaming request to Ollama API timed out after {self.timeout} seconds")
-        except requests.exceptions.RequestException as e:
-            raise ConnectionError(f"Error connecting to Ollama API for streaming: {str(e)}")
+                        # Decode the line
+                        buffer += line.decode("utf-8")
+                        
+                        # Process any complete JSON objects
+                        while "\n" in buffer:
+                            line_json, buffer = buffer.split("\n", 1)
+                            try:
+                                chunk = json.loads(line_json)
+                                yield chunk
+                            except json.JSONDecodeError:
+                                # Skip invalid JSON
+                                pass
+                
+                # Process any remaining data
+                if buffer:
+                    try:
+                        chunk = json.loads(buffer)
+                        yield chunk
+                    except json.JSONDecodeError:
+                        # Skip invalid JSON
+                        pass
+                        
+        except RequestException as e:
+            # Handle request exceptions
+            print(f"Error streaming from Ollama API: {e}")
+            raise
+                
+    def _format_messages(self, messages):
+        """
+        Format messages for Ollama's API.
+        
+        Args:
+            messages: List of message dictionaries
+            
+        Returns:
+            Formatted conversation string
+        """
+        formatted = []
+        
+        for message in messages:
+            role = message.get("role", "user")
+            content = message.get("content", "")
+            
+            if role == "user":
+                formatted.append(f"User: {content}")
+            elif role == "assistant":
+                formatted.append(f"Assistant: {content}")
+            # Ignore system messages as they're handled separately
+        
+        # Join with double newlines for clear separation
+        return "\n\n".join(formatted)
+        
+    def _call_api(self, endpoint, data=None, method="POST"):
+        """
+        Call the Ollama API.
+        
+        Args:
+            endpoint: API endpoint
+            data: Request data
+            method: HTTP method
+            
+        Returns:
+            API response as a dictionary
+        """
+        # ... existing code ...
     
     def chat(
         self, 

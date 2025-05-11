@@ -173,5 +173,20 @@ class AgentConfigLoader:
         # Load the configuration
         with open(config_path, "r") as f:
             config = yaml.safe_load(f)
+        
+        # Add genre to the configuration for use by specialized LLMs
+        config["genre"] = genre
+        
+        # Add context window settings based on agent type and genre
+        config["respect_context_window"] = True
+        
+        # Adjust context window parameters based on agent type
+        # Writers and editors need larger context windows
+        if agent_type in ["writer", "editor"]:
+            config["max_tokens"] = 4000
+        elif agent_type in ["plotter", "worldbuilder"]:
+            config["max_tokens"] = 3000
+        else:
+            config["max_tokens"] = 2000
             
         return config 

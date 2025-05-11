@@ -29,12 +29,71 @@ generation:
 agent:
   enable_delegation: false
   verbose: true
+  
+  # Advanced LLM optimization settings
+  use_specialized_llms: true  # Enable role-specialized LLMs
+  use_structured_output: true  # Enable structured Pydantic responses
+  respect_context_window: true  # Enable context window management
+  enable_streaming: true  # Enable streaming for long outputs
 
 # Cache settings
 cache:
   enable_cache: true
   cache_dir: "./.cache"
   max_cache_size: 1024  # MB
+
+# Memory settings
+memory:
+  enable: true
+  storage_dir: "./.memory"  # Custom storage directory for memory files
+  # Memory component configuration
+  long_term:
+    enabled: true
+    db_path: "long_term_memory.db"  # Relative to storage_dir
+  short_term:
+    enabled: true 
+    provider: "rag"  # Using RAG for short-term memory
+  entity:
+    enabled: true
+    track_entities: true  # Enable tracking of entities in stories
+  # Embedding configuration
+  embedder:
+    provider: "openai"  # Options: openai, ollama, google, etc.
+    model: "text-embedding-3-small"  # For OpenAI embeddings
+
+# LLM optimization settings
+llm_optimization:
+  # Task-specific temperature settings
+  planning_temperature: 0.2  # Lower temperature for planning tasks
+  creative_temperature: 0.8  # Higher temperature for creative tasks
+  factual_temperature: 0.3  # Lower temperature for factual/research tasks
+  
+  # Context window management
+  context_window_sizes:
+    planning: 4096
+    research: 4096
+    worldbuilding: 8192
+    character: 4096
+    plot: 8192
+    writing: 16384
+    editing: 16384
+    
+  # Streaming configuration
+  streaming:
+    enabled: true
+    chunk_size: 20  # Tokens per chunk
+    
+  # Structured output settings
+  structured_output:
+    enabled: true
+    schema_validation: true  # Validate outputs against schema
+    retry_on_validation_error: true  # Retry if validation fails
+    
+  # Token usage monitoring
+  token_monitoring:
+    enabled: true
+    log_token_usage: true
+    budget_limit: 0  # 0 = no limit
 
 # Plugin-specific configurations can be added here
 # Example: Western genre plugin configuration

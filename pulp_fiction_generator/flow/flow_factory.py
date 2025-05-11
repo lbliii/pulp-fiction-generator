@@ -80,6 +80,44 @@ class FlowFactory:
         # Inject the crew factory
         flow.crew_factory = self.crew_factory
         
+        # Configure specialized LLMs based on the genre and add them to the flow
+        model_service = self.crew_factory.model_service
+        specialized_llms = {}
+        
+        # Add structured response models for specific phases
+        try:
+            # For worldbuilding phase, use structured output
+            if genre in ["fantasy", "scifi", "adventure"]:
+                specialized_llms["worldbuilding_llm"] = model_service.get_worldbuilding_llm()
+                
+            # For outline phase, use structured output
+            specialized_llms["outline_llm"] = model_service.get_story_outline_llm()
+                
+            # For character creation, use structured output
+            from ..models.schema import Character
+            specialized_llms["character_llm"] = model_service.get_llm(
+                model=model_service.default_model_name,
+                temperature=0.6,
+                response_format=Character
+            )
+                
+            # For streaming responses in longer tasks (like draft writing)
+            specialized_llms["streaming_llm"] = model_service.get_streaming_llm()
+                
+            # For planning
+            specialized_llms["planning_llm"] = model_service.get_planning_llm()
+                
+            # For historical research if applicable
+            if genre in ["western", "noir", "historical"]:
+                specialized_llms["historical_llm"] = model_service.get_historical_analysis_llm()
+                
+            # Add the specialized LLMs to the flow state
+            initial_state.custom_inputs["specialized_llms"] = specialized_llms
+            
+        except Exception as e:
+            print(f"Warning: Failed to configure specialized LLMs: {e}")
+            # Continue without specialized LLMs
+        
         return flow
     
     def execute_flow(
