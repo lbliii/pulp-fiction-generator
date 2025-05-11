@@ -10,9 +10,13 @@ This module provides a centralized Config class that handles:
 
 import os
 import yaml
+import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union, TypeVar, Type, cast
 from dataclasses import dataclass, field, asdict
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 # Type for configuration schemas
 T = TypeVar('T', bound='ConfigSection')
@@ -169,6 +173,16 @@ class Config:
         
         # Load configuration from environment variables
         self.load_from_env()
+        
+        # Validate configuration and log warnings for invalid values
+        self._validate_and_log_warnings()
+    
+    def _validate_and_log_warnings(self):
+        """Validate configuration and log warnings for invalid values"""
+        validation_errors = self.validate()
+        if validation_errors:
+            for error in validation_errors:
+                logger.warning(f"Config validation: {error}")
     
     def load_from_file(self) -> bool:
         """
@@ -187,9 +201,12 @@ class Config:
                         continue
                     
                     self._update_from_dict(config_data)
+                    logger.info(f"Loaded configuration from {config_path}")
                     return True
+                except yaml.YAMLError as e:
+                    logger.error(f"YAML parsing error in config file {config_path}: {e}")
                 except Exception as e:
-                    print(f"Error loading configuration from {config_path}: {e}")
+                    logger.error(f"Error loading configuration from {config_path}: {e}")
         
         return False
     
@@ -206,28 +223,28 @@ class Config:
             try:
                 self.ollama.threads = int(os.environ.get("OLLAMA_THREADS"))
             except ValueError:
-                print(f"Warning: Invalid OLLAMA_THREADS value: {os.environ.get('OLLAMA_THREADS')}. Using default: {self.ollama.threads}")
+                logger.warning(f"Invalid OLLAMA_THREADS value: {os.environ.get('OLLAMA_THREADS')}. Using default: {self.ollama.threads}")
         
         if os.environ.get("OLLAMA_GPU_LAYERS"):
             try:
                 self.ollama.gpu_layers = int(os.environ.get("OLLAMA_GPU_LAYERS"))
             except ValueError:
-                print(f"Warning: Invalid OLLAMA_GPU_LAYERS value: {os.environ.get('OLLAMA_GPU_LAYERS')}. Using default: {self.ollama.gpu_layers}")
+                logger.warning(f"Invalid OLLAMA_GPU_LAYERS value: {os.environ.get('OLLAMA_GPU_LAYERS')}. Using default: {self.ollama.gpu_layers}")
         
         if os.environ.get("OLLAMA_CTX_SIZE"):
             try:
                 self.ollama.ctx_size = int(os.environ.get("OLLAMA_CTX_SIZE"))
             except ValueError:
-                print(f"Warning: Invalid OLLAMA_CTX_SIZE value: {os.environ.get('OLLAMA_CTX_SIZE')}. Using default: {self.ollama.ctx_size}")
+                logger.warning(f"Invalid OLLAMA_CTX_SIZE value: {os.environ.get('OLLAMA_CTX_SIZE')}. Using default: {self.ollama.ctx_size}")
         
         if os.environ.get("OLLAMA_BATCH_SIZE"):
             try:
                 self.ollama.batch_size = int(os.environ.get("OLLAMA_BATCH_SIZE"))
             except ValueError:
-                print(f"Warning: Invalid OLLAMA_BATCH_SIZE value: {os.environ.get('OLLAMA_BATCH_SIZE')}. Using default: {self.ollama.batch_size}")
+                logger.warning(f"Invalid OLLAMA_BATCH_SIZE value: {os.environ.get('OLLAMA_BATCH_SIZE')}. Using default: {self.ollama.batch_size}")
         
         # App config
-        if os.environ.get("DEBUG"):
+        if os.environ.get("DEBUG") is not None:
             self.app.debug = os.environ.get("DEBUG").lower() in ("true", "1", "yes")
         
         if os.environ.get("LOG_LEVEL"):
@@ -244,25 +261,25 @@ class Config:
             try:
                 self.generation.max_retry_count = int(os.environ.get("MAX_RETRY_COUNT"))
             except ValueError:
-                print(f"Warning: Invalid MAX_RETRY_COUNT value: {os.environ.get('MAX_RETRY_COUNT')}. Using default: {self.generation.max_retry_count}")
+                logger.warning(f"Invalid MAX_RETRY_COUNT value: {os.environ.get('MAX_RETRY_COUNT')}. Using default: {self.generation.max_retry_count}")
         
         if os.environ.get("GENERATION_TIMEOUT"):
             try:
                 self.generation.generation_timeout = int(os.environ.get("GENERATION_TIMEOUT"))
             except ValueError:
-                print(f"Warning: Invalid GENERATION_TIMEOUT value: {os.environ.get('GENERATION_TIMEOUT')}. Using default: {self.generation.generation_timeout}")
+                logger.warning(f"Invalid GENERATION_TIMEOUT value: {os.environ.get('GENERATION_TIMEOUT')}. Using default: {self.generation.generation_timeout}")
         
         if os.environ.get("TEMPERATURE"):
             try:
                 self.generation.temperature = float(os.environ.get("TEMPERATURE"))
             except ValueError:
-                print(f"Warning: Invalid TEMPERATURE value: {os.environ.get('TEMPERATURE')}. Using default: {self.generation.temperature}")
+                logger.warning(f"Invalid TEMPERATURE value: {os.environ.get('TEMPERATURE')}. Using default: {self.generation.temperature}")
         
         if os.environ.get("TOP_P"):
             try:
                 self.generation.top_p = float(os.environ.get("TOP_P"))
             except ValueError:
-                print(f"Warning: Invalid TOP_P value: {os.environ.get('TOP_P')}. Using default: {self.generation.top_p}")
+                logger.warning(f"Invalid TOP_P value: {os.environ.get('TOP_P')}. Using default: {self.generation.top_p}")
         
         # Agent config
         if os.environ.get("ENABLE_AGENT_DELEGATION"):
@@ -272,7 +289,7 @@ class Config:
             self.agent.verbose = os.environ.get("AGENT_VERBOSE").lower() in ("true", "1", "yes")
         
         # Cache config
-        if os.environ.get("ENABLE_CACHE"):
+        if os.environ.get("ENABLE_CACHE") is not None:
             self.cache.enable_cache = os.environ.get("ENABLE_CACHE").lower() in ("true", "1", "yes")
         
         if os.environ.get("CACHE_DIR"):
@@ -282,7 +299,7 @@ class Config:
             try:
                 self.cache.max_cache_size = int(os.environ.get("MAX_CACHE_SIZE"))
             except ValueError:
-                print(f"Warning: Invalid MAX_CACHE_SIZE value: {os.environ.get('MAX_CACHE_SIZE')}. Using default: {self.cache.max_cache_size}")
+                logger.warning(f"Invalid MAX_CACHE_SIZE value: {os.environ.get('MAX_CACHE_SIZE')}. Using default: {self.cache.max_cache_size}")
     
     def _update_from_dict(self, data: Dict[str, Any]) -> None:
         """

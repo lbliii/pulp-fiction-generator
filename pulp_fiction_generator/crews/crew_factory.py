@@ -8,8 +8,10 @@ import json
 import os
 import re
 import os.path
+import uuid
 
 from crewai import Agent, Crew, Process, Task
+from crewai.security import Fingerprint
 
 from ..agents.agent_factory import AgentFactory
 from ..agents.manager_agent import StoryManagerAgent
@@ -198,8 +200,6 @@ class CrewFactory:
         # Create a StoryManagerAgent instance
         self.story_manager_agent = StoryManagerAgent(
             llm_config=self.agent_factory.get_default_llm_config(),
-            tools=self.agent_factory.get_manager_tools(),
-            verbose=self.verbose
         )
     
     def validate_process_configuration(self, process: Process, config: Dict[str, Any]) -> bool:
@@ -301,6 +301,116 @@ class CrewFactory:
             
         return None
     
+    def _enhance_crew_fingerprint(self, crew: Crew, metadata: Dict[str, Any]) -> None:
+        """
+        Enhance a crew's fingerprint with additional metadata.
+        
+        Args:
+            crew: The crew instance
+            metadata: The metadata to add to the fingerprint
+        """
+        fingerprint = crew.security_config.fingerprint
+        
+        # Get existing metadata or initialize empty dict
+        existing_metadata = fingerprint.metadata or {}
+        
+        # Update with new metadata
+        existing_metadata.update(metadata)
+        
+        # Set the updated metadata
+        fingerprint.metadata = existing_metadata
+    
+    def _generate_crew_identifier(self, crew_type: str, genre: str) -> str:
+        """
+        Generate a unique identifier for a crew based on type and genre.
+        
+        Args:
+            crew_type: The type of crew (e.g., basic, continuation, custom)
+            genre: The genre of the crew
+            
+        Returns:
+            A unique identifier string
+        """
+        timestamp = int(time.time())
+        return f"{crew_type}_{genre}_{timestamp}"
+    
+    def _get_agent_fingerprints(self, agents: List[Agent]) -> Dict[str, str]:
+        """
+        Get a dictionary of agent names and their fingerprint UUIDs.
+        
+        Args:
+            agents: List of agent instances
+            
+        Returns:
+            Dictionary mapping agent names to fingerprint UUIDs
+        """
+        return {
+            agent.role: agent.fingerprint.uuid_str
+            for agent in agents
+        }
+        
+    def _create_crew_with_fingerprinting(
+        self,
+        crew_type: str,
+        agents: List[Agent],
+        tasks: List[Task],
+        genre: str,
+        custom_inputs: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None
+    ) -> Crew:
+        """
+        Create a crew with fingerprinting metadata.
+        
+        Args:
+            crew_type: Type identifier for the crew
+            agents: List of agent instances for the crew
+            tasks: List of tasks for the crew
+            genre: Genre of the story being created
+            custom_inputs: Optional custom inputs for the crew
+            config: Optional configuration overrides
+            
+        Returns:
+            Configured Crew instance with fingerprinting
+        """
+        # Get effective configuration
+        effective_config = self._get_effective_config(config or {})
+        
+        # Generate a deterministic ID for the crew
+        crew_id = self._generate_crew_identifier(crew_type, genre)
+        
+        # Create the crew
+        crew = Crew(
+            agents=agents,
+            tasks=tasks,
+            verbose=effective_config.get("verbose", self.verbose),
+            manager_llm=effective_config.get("manager_llm"),
+            manager_agent=self.story_manager_agent.get_agent() if effective_config.get("use_manager", True) else None,
+            process=effective_config.get("process", self.process),
+            full_output=effective_config.get("full_output", True),
+            memory=effective_config.get("memory", True),
+            max_rpm=effective_config.get("max_rpm"),
+            cache=effective_config.get("cache", True),
+            enable_planning=effective_config.get("enable_planning", self.enable_planning),
+            event_listeners=self.event_listeners if self.use_event_listeners else None
+        )
+        
+        # Add metadata to the crew's fingerprint
+        self._enhance_crew_fingerprint(crew, {
+            "crew_type": crew_type,
+            "genre": genre,
+            "crew_id": crew_id,
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "agent_fingerprints": self._get_agent_fingerprints(agents),
+            "task_count": len(tasks),
+            "custom_inputs": custom_inputs or {}
+        })
+        
+        # Store custom inputs (if any)
+        if custom_inputs:
+            self.store_custom_inputs(crew, custom_inputs)
+            
+        return crew
+
     def create_basic_crew_with_inputs(
         self, 
         genre: str, 
@@ -308,15 +418,15 @@ class CrewFactory:
         config: Optional[Dict[str, Any]] = None
     ) -> Crew:
         """
-        Create a basic crew with all standard agents for a genre, supporting custom inputs.
+        Create a basic crew for generating stories with custom inputs.
         
         Args:
-            genre: The genre to create the crew for
-            custom_inputs: Optional custom inputs to be used by the crew
+            genre: Genre of the story to create
+            custom_inputs: Dictionary of custom inputs for agents
             config: Optional configuration overrides
             
         Returns:
-            A configured crew ready to use custom inputs
+            Configured crew instance
         """
         # Create the basic crew
         crew = self.create_basic_crew(genre=genre, config=config)
@@ -494,13 +604,13 @@ class CrewFactory:
         Create a crew for continuing a previously generated story.
         
         Args:
-            genre: The genre of the story
-            previous_output: The output from the previous generation
-            custom_inputs: Optional custom inputs for the crew
+            genre: Genre of the story
+            previous_output: Previously generated story content
+            custom_inputs: Optional custom inputs for agents
             config: Optional configuration overrides
             
         Returns:
-            A configured crew for continuation
+            Configured crew instance
         """
         # Create a basic crew first
         crew = self.create_basic_crew(genre=genre, config=config)
@@ -517,7 +627,15 @@ class CrewFactory:
             # Just store the previous output
             self.store_custom_inputs(crew, previous_output_data)
             
-        return crew
+        # Create the crew with fingerprinting
+        return self._create_crew_with_fingerprinting(
+            crew_type="continuation",
+            agents=crew.agents,
+            tasks=crew.tasks,
+            genre=genre,
+            custom_inputs=custom_inputs,
+            config=config
+        )
     
     def create_custom_crew(
         self, 
@@ -531,14 +649,14 @@ class CrewFactory:
         Create a crew with custom agents and tasks.
         
         Args:
-            genre: The genre of the story
+            genre: Genre of the story
             agent_types: List of agent types to include
             task_descriptions: List of task descriptions
-            custom_inputs: Optional custom inputs for the crew
-            config: Optional configuration for the crew
+            custom_inputs: Optional custom inputs for agents
+            config: Optional configuration overrides
             
         Returns:
-            A configured crew
+            Configured crew instance
         """
         if len(agent_types) != len(task_descriptions):
             raise ValueError("Number of agent types must match number of task descriptions")
@@ -559,26 +677,15 @@ class CrewFactory:
                 )
             )
         
-        # Get configuration
-        effective_config = self._get_effective_config(config or {})
-        
-        # Create the crew
-        crew = Crew(
+        # Create the crew with fingerprinting
+        return self._create_crew_with_fingerprinting(
+            crew_type="custom",
             agents=agents,
             tasks=tasks,
-            process=self.process,
-            verbose=self.verbose,
-            memory=effective_config.get("memory", False),
-            cache=effective_config.get("cache", False),
-            manager_llm=effective_config.get("manager_llm", None),
-            function_calling_llm=effective_config.get("function_calling_llm", None)
+            genre=genre,
+            custom_inputs=custom_inputs,
+            config=config
         )
-        
-        # Store custom inputs
-        if custom_inputs:
-            self.store_custom_inputs(crew, custom_inputs)
-            
-        return crew
         
     def create_specialized_crew(
         self, 
@@ -587,15 +694,15 @@ class CrewFactory:
         inputs: Optional[Dict[str, Any]] = None
     ) -> Crew:
         """
-        Create a specialized crew for a specific story generation phase.
+        Create a specialized crew for a specific phase of story generation.
         
         Args:
-            phase_type: The type of crew to create (research, worldbuilding, etc.)
-            genre: The genre for the story
-            inputs: Any inputs to provide to the crew
+            phase_type: Type of story phase ("worldbuilding", "character", etc.)
+            genre: Genre of the story
+            inputs: Optional inputs for the crew
             
         Returns:
-            A configured crew for the specified phase
+            Configured crew instance
         """
         # Define agent types and task descriptions for each phase
         phase_configs = {
@@ -632,10 +739,12 @@ class CrewFactory:
         # Get the configuration for the phase
         phase_config = phase_configs[phase_type]
         
-        # Create and return a custom crew with the phase configuration
-        return self.create_custom_crew(
+        # Create the crew with fingerprinting
+        return self._create_crew_with_fingerprinting(
+            crew_type=f"specialized_{phase_type}",
+            agents=self.agent_factory.create_agents(phase_config["agent_types"], genre),
+            tasks=self.agent_factory.create_tasks(phase_config["task_descriptions"], genre),
             genre=genre,
-            agent_types=phase_config["agent_types"],
-            task_descriptions=phase_config["task_descriptions"],
-            custom_inputs=inputs
+            custom_inputs=inputs,
+            config=None
         ) 

@@ -74,6 +74,14 @@ def list_genres():
     if plugin_genres:
         console.print(f"pulp-fiction generate --genre {plugin_genres[0]['name']} --chapters 1")
 
+# Add basic commandline help
+console.print("\n[bold]Common commands:[/bold]")
+console.print("pulp-fiction generate --help           # Show all generation options")
+console.print("pulp-fiction list-genres               # List available genres")
+console.print("pulp-fiction list-plugins              # List installed plugins")
+console.print("pulp-fiction list-projects             # List saved story projects")
+console.print("pulp-fiction flow generate --genre sci-fi # Generate using flow architecture")
+
 # The command registry will pick up this name and function directly
 list_genres.name = "list-genres"
 list_genres.help = "List available pulp fiction genres" 

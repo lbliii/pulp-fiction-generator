@@ -6,11 +6,12 @@ import os
 import pytest
 from unittest.mock import Mock, patch, MagicMock, call
 
-from pulp_fiction_generator.story import StoryGenerator, StoryArtifacts
-from pulp_fiction_generator.story.execution import ExecutionEngine
-from pulp_fiction_generator.story.validation import StoryValidator
-from pulp_fiction_generator.story.tasks import TaskFactory
-from pulp_fiction_generator.story.state import StoryStateManager
+from pulp_fiction_generator.story import StoryGenerator
+from pulp_fiction_generator.models import ModelAdapter, MessageBase
+from pulp_fiction_generator.story_model.execution import ExecutionEngine
+from pulp_fiction_generator.story_model.validation import StoryValidator
+from pulp_fiction_generator.story_model.tasks import TaskFactory
+from pulp_fiction_generator.story_model.state import StoryStateManager
 
 
 class TestStoryGenerator:

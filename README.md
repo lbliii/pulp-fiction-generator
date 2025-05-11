@@ -85,6 +85,62 @@ memory:
     model: "text-embedding-3-small"
 ```
 
+### Fingerprinting System
+The project now implements CrewAI's fingerprinting system for enhanced traceability and debugging:
+
+- **Unique Identifiers**: Each agent, crew, and task gets a unique fingerprint for tracking throughout its lifecycle
+- **Metadata Enrichment**: Fingerprints store context-specific metadata for better understanding component relationships
+- **Execution Tracing**: Complete trace of agent and task execution paths for debugging complex issues
+- **Deterministic Fingerprints**: Option to create reproducible identifiers for consistent tracking
+- **Visualization**: Enhanced visualization tools that leverage fingerprinting for better insights
+- **Lifecycle Analysis**: Analyze component lifecycles through fingerprint tracking
+- **Enhanced Logging**: All logs now include fingerprint references for better correlation
+
+Fingerprinting examples:
+```python
+# Create an agent with a deterministic fingerprint
+writer_agent = agent_factory.create_agent(
+    agent_type="writer",
+    genre="noir",
+    deterministic_id="noir_writer_v1"
+)
+
+# Access fingerprint information
+fingerprint = writer_agent.fingerprint
+print(f"Agent UUID: {fingerprint.uuid_str}")
+print(f"Agent metadata: {fingerprint.metadata}")
+print(f"Creation time: {fingerprint.created_at}")
+
+# Track execution with fingerprints
+print(f"Task fingerprint: {task.fingerprint.uuid_str}")
+```
+
+CLI examples:
+```bash
+# Generate a story with fingerprinting enabled
+pulp-fiction generate --genre noir --track-fingerprints
+
+# Analyze fingerprint data for a specific run
+pulp-fiction analyze --fingerprints --last-run
+
+# Export fingerprint data to a file
+pulp-fiction export --fingerprints --format json --output fingerprints.json
+```
+
+Configure fingerprinting in config.yaml:
+```yaml
+# Fingerprinting settings
+fingerprinting:
+  enabled: true
+  deterministic: false  # Set to true for reproducible fingerprints
+  metadata:
+    include_version: true
+    include_environment: true
+  visualization:
+    enabled: true
+    output_dir: "./logs/fingerprint_graphs"
+```
+
 ### Enhanced Agent Tools
 The project now integrates a comprehensive set of CrewAI tools to enhance agent capabilities:
 
@@ -469,7 +525,7 @@ pulp-fiction check-model
 
 List saved stories:
 ```bash
-pulp-fiction list-stories
+pulp-fiction list-projects
 ```
 
 Continue an existing story:
@@ -477,7 +533,14 @@ Continue an existing story:
 pulp-fiction generate --continue your_story_file.json --chapters 1
 ```
 
-See [docs/usage.md](docs/usage.md) for complete documentation and examples.
+For complete documentation on CLI usage, see [docs/cli_usage.md](docs/cli_usage.md).
+
+## Recent Improvements
+
+- **Enhanced CLI Interface**: The command-line interface has been improved with standardized naming conventions (using hyphens), better error handling, and more consistent parameter parsing.
+- **Improved Configuration System**: The configuration system now includes better validation, clear error messages, and structured warning logs.
+- **Dependency Checking**: Startup checks for required dependencies and versions to avoid compatibility issues.
+- **Comprehensive Documentation**: New detailed CLI usage guide with examples for all commands and options.
 
 ## Development
 

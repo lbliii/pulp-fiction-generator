@@ -16,8 +16,8 @@ from pulp_fiction_generator.models.model_service import ModelService
 from pulp_fiction_generator.agents.agent_factory import AgentFactory
 from pulp_fiction_generator.crews.crew_factory import CrewFactory
 from pulp_fiction_generator.crews.crew_coordinator import CrewCoordinator
-from pulp_fiction_generator.story.generator import StoryGenerator
-from pulp_fiction_generator.story.models import StoryArtifacts
+from pulp_fiction_generator.story_generation.story_generator import StoryGenerator
+from pulp_fiction_generator.story_model.models import StoryArtifacts
 
 # Try to import CrewAI tools
 try:

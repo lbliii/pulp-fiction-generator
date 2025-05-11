@@ -16,7 +16,7 @@ from ...crews.crew_coordinator import CrewCoordinator
 from ...crews.config.crew_coordinator_config import CrewCoordinatorConfig
 from ...models.ollama_adapter import OllamaAdapter
 from ...utils.story_persistence import StoryPersistence, StoryState
-from ...story.state import StoryStateManager
+from ...story_model.state import StoryStateManager
 from ...utils.errors import logger
 
 app = typer.Typer(help="Flow commands for visualizing and running story generation")

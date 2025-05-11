@@ -29,6 +29,7 @@ from crewai.utilities.events import (
 )
 from crewai.utilities.events.base_event_listener import BaseEventListener
 from crewai.utilities.events import crewai_event_bus
+from crewai.security import Fingerprint
 
 from ..utils.errors import logger
 
@@ -227,7 +228,10 @@ class CrewAILoggingListener(BaseEventListener):
         self.log_dir = log_dir
         os.makedirs(log_dir, exist_ok=True)
         self.event_count = 0
-    
+        
+        # Track fingerprints for better correlation
+        self.fingerprint_registry = {}
+        
     def setup_listeners(self, crewai_event_bus):
         """
         Set up event listeners for various CrewAI events.
@@ -238,91 +242,201 @@ class CrewAILoggingListener(BaseEventListener):
         # Crew Events
         @crewai_event_bus.on(CrewKickoffStartedEvent)
         def on_crew_started(source, event):
-            self._log_event("crew_kickoff_started", {
-                "crew_name": event.crew_name,
-                "timestamp": event.timestamp
+            # Extract and store crew fingerprint for future reference
+            crew = event.crew
+            crew_fingerprint = crew.fingerprint.uuid_str if hasattr(crew, 'fingerprint') else None
+            
+            # Register the crew fingerprint
+            if crew_fingerprint:
+                crew_metadata = crew.fingerprint.metadata or {}
+                crew_name = str(crew)
+                self.fingerprint_registry[crew_fingerprint] = {
+                    "type": "crew",
+                    "name": crew_name,
+                    "metadata": crew_metadata,
+                    "timestamp": time.time()
+                }
+            
+            self._log_event("crew_started", {
+                "message": f"Crew execution started",
+                "crew_id": str(crew),
+                "crew_fingerprint": crew_fingerprint,
+                "num_agents": len(crew.agents) if hasattr(crew, 'agents') else 0,
+                "num_tasks": len(crew.tasks) if hasattr(crew, 'tasks') else 0,
+                "crew_metadata": crew_metadata if crew_fingerprint else {}
             })
-            logger.info(f"Crew '{event.crew_name}' started execution")
-        
+            
         @crewai_event_bus.on(CrewKickoffCompletedEvent)
         def on_crew_completed(source, event):
-            self._log_event("crew_kickoff_completed", {
-                "crew_name": event.crew_name,
-                "output": event.output,
-                "timestamp": event.timestamp
+            crew = event.crew
+            crew_fingerprint = crew.fingerprint.uuid_str if hasattr(crew, 'fingerprint') else None
+            
+            # Calculate execution time if we have the start time in the registry
+            execution_time = None
+            if crew_fingerprint and crew_fingerprint in self.fingerprint_registry:
+                start_time = self.fingerprint_registry[crew_fingerprint].get("timestamp")
+                if start_time:
+                    execution_time = time.time() - start_time
+            
+            self._log_event("crew_completed", {
+                "message": f"Crew execution completed successfully",
+                "crew_id": str(crew),
+                "crew_fingerprint": crew_fingerprint,
+                "execution_time": f"{execution_time:.2f}s" if execution_time else None,
+                "result": str(event.output)[:100] + "..." if len(str(event.output)) > 100 else str(event.output)
             })
-            logger.info(f"Crew '{event.crew_name}' completed execution")
-        
+            
         @crewai_event_bus.on(CrewKickoffFailedEvent)
         def on_crew_failed(source, event):
-            self._log_event("crew_kickoff_failed", {
-                "crew_name": event.crew_name,
-                "error": str(event.error),
-                "timestamp": event.timestamp
+            crew = event.crew
+            crew_fingerprint = crew.fingerprint.uuid_str if hasattr(crew, 'fingerprint') else None
+            
+            # Calculate execution time if we have the start time in the registry
+            execution_time = None
+            if crew_fingerprint and crew_fingerprint in self.fingerprint_registry:
+                start_time = self.fingerprint_registry[crew_fingerprint].get("timestamp")
+                if start_time:
+                    execution_time = time.time() - start_time
+            
+            self._log_event("crew_failed", {
+                "message": f"Crew execution failed",
+                "crew_id": str(crew),
+                "crew_fingerprint": crew_fingerprint,
+                "execution_time": f"{execution_time:.2f}s" if execution_time else None,
+                "error": str(event.error)
             })
-            logger.error(f"Crew '{event.crew_name}' failed: {event.error}")
         
         # Agent Events
         @crewai_event_bus.on(AgentExecutionStartedEvent)
         def on_agent_execution_started(source, event):
+            agent = event.agent
+            agent_fingerprint = agent.fingerprint.uuid_str if hasattr(agent, 'fingerprint') else None
+            
+            # Register the agent fingerprint
+            if agent_fingerprint:
+                agent_metadata = agent.fingerprint.metadata or {}
+                agent_role = agent.role if hasattr(agent, 'role') else str(agent)
+                self.fingerprint_registry[agent_fingerprint] = {
+                    "type": "agent",
+                    "role": agent_role,
+                    "metadata": agent_metadata,
+                    "timestamp": time.time()
+                }
+            
             self._log_event("agent_execution_started", {
-                "agent_name": event.agent.role,
-                "agent_id": str(event.agent.id),
-                "task": event.task.description if event.task else "No task",
-                "timestamp": event.timestamp
+                "message": f"Agent execution started",
+                "agent_role": agent.role if hasattr(agent, 'role') else str(agent),
+                "agent_fingerprint": agent_fingerprint,
+                "agent_metadata": agent_metadata if agent_fingerprint else {}
             })
-            logger.info(f"Agent '{event.agent.role}' started execution")
         
         @crewai_event_bus.on(AgentExecutionCompletedEvent)
         def on_agent_execution_completed(source, event):
+            agent = event.agent
+            agent_fingerprint = agent.fingerprint.uuid_str if hasattr(agent, 'fingerprint') else None
+            
+            # Calculate execution time if we have the start time in the registry
+            execution_time = None
+            if agent_fingerprint and agent_fingerprint in self.fingerprint_registry:
+                start_time = self.fingerprint_registry[agent_fingerprint].get("timestamp")
+                if start_time:
+                    execution_time = time.time() - start_time
+            
             self._log_event("agent_execution_completed", {
-                "agent_name": event.agent.role,
-                "agent_id": str(event.agent.id),
-                "output": event.output,
-                "timestamp": event.timestamp
+                "message": f"Agent execution completed",
+                "agent_role": agent.role if hasattr(agent, 'role') else str(agent),
+                "agent_fingerprint": agent_fingerprint,
+                "execution_time": f"{execution_time:.2f}s" if execution_time else None,
+                "result": str(event.output)[:100] + "..." if len(str(event.output)) > 100 else str(event.output)
             })
-            logger.info(f"Agent '{event.agent.role}' completed execution")
         
         @crewai_event_bus.on(AgentExecutionErrorEvent)
         def on_agent_execution_error(source, event):
+            agent = event.agent
+            agent_fingerprint = agent.fingerprint.uuid_str if hasattr(agent, 'fingerprint') else None
+            
+            # Calculate execution time if we have the start time in the registry
+            execution_time = None
+            if agent_fingerprint and agent_fingerprint in self.fingerprint_registry:
+                start_time = self.fingerprint_registry[agent_fingerprint].get("timestamp")
+                if start_time:
+                    execution_time = time.time() - start_time
+            
             self._log_event("agent_execution_error", {
-                "agent_name": event.agent.role,
-                "agent_id": str(event.agent.id),
-                "error": str(event.error),
-                "timestamp": event.timestamp
+                "message": f"Agent execution error",
+                "agent_role": agent.role if hasattr(agent, 'role') else str(agent),
+                "agent_fingerprint": agent_fingerprint,
+                "execution_time": f"{execution_time:.2f}s" if execution_time else None,
+                "error": str(event.error)
             })
-            logger.error(f"Agent '{event.agent.role}' error: {event.error}")
         
         # Task Events
         @crewai_event_bus.on(TaskStartedEvent)
         def on_task_started(source, event):
+            task = event.task
+            task_fingerprint = task.fingerprint.uuid_str if hasattr(task, 'fingerprint') else None
+            
+            # Register the task fingerprint
+            if task_fingerprint:
+                task_metadata = task.fingerprint.metadata or {}
+                self.fingerprint_registry[task_fingerprint] = {
+                    "type": "task",
+                    "description": task.description if hasattr(task, 'description') else str(task),
+                    "metadata": task_metadata,
+                    "timestamp": time.time()
+                }
+            
             self._log_event("task_started", {
-                "task_description": event.task.description,
-                "task_id": str(event.task.id),
-                "agent": event.task.agent.role if event.task.agent else "No agent",
-                "timestamp": event.timestamp
+                "message": f"Task started",
+                "task_description": task.description if hasattr(task, 'description') else str(task),
+                "task_fingerprint": task_fingerprint,
+                "agent_role": task.agent.role if hasattr(task, 'agent') and hasattr(task.agent, 'role') else "Unknown",
+                "agent_fingerprint": task.agent.fingerprint.uuid_str if hasattr(task, 'agent') and hasattr(task.agent, 'fingerprint') else None
             })
-            logger.info(f"Task '{event.task.description[:50]}...' started")
         
         @crewai_event_bus.on(TaskCompletedEvent)
         def on_task_completed(source, event):
+            task = event.task
+            task_fingerprint = task.fingerprint.uuid_str if hasattr(task, 'fingerprint') else None
+            
+            # Calculate execution time if we have the start time in the registry
+            execution_time = None
+            if task_fingerprint and task_fingerprint in self.fingerprint_registry:
+                start_time = self.fingerprint_registry[task_fingerprint].get("timestamp")
+                if start_time:
+                    execution_time = time.time() - start_time
+            
             self._log_event("task_completed", {
-                "task_description": event.task.description,
-                "task_id": str(event.task.id),
-                "output": event.output,
-                "timestamp": event.timestamp
+                "message": f"Task completed",
+                "task_description": task.description if hasattr(task, 'description') else str(task),
+                "task_fingerprint": task_fingerprint,
+                "agent_role": task.agent.role if hasattr(task, 'agent') and hasattr(task.agent, 'role') else "Unknown",
+                "agent_fingerprint": task.agent.fingerprint.uuid_str if hasattr(task, 'agent') and hasattr(task.agent, 'fingerprint') else None,
+                "execution_time": f"{execution_time:.2f}s" if execution_time else None,
+                "result": str(event.output)[:100] + "..." if len(str(event.output)) > 100 else str(event.output)
             })
-            logger.info(f"Task '{event.task.description[:50]}...' completed")
         
         @crewai_event_bus.on(TaskFailedEvent)
         def on_task_failed(source, event):
+            task = event.task
+            task_fingerprint = task.fingerprint.uuid_str if hasattr(task, 'fingerprint') else None
+            
+            # Calculate execution time if we have the start time in the registry
+            execution_time = None
+            if task_fingerprint and task_fingerprint in self.fingerprint_registry:
+                start_time = self.fingerprint_registry[task_fingerprint].get("timestamp")
+                if start_time:
+                    execution_time = time.time() - start_time
+            
             self._log_event("task_failed", {
-                "task_description": event.task.description,
-                "task_id": str(event.task.id),
-                "error": str(event.error),
-                "timestamp": event.timestamp
+                "message": f"Task failed",
+                "task_description": task.description if hasattr(task, 'description') else str(task),
+                "task_fingerprint": task_fingerprint,
+                "agent_role": task.agent.role if hasattr(task, 'agent') and hasattr(task.agent, 'role') else "Unknown",
+                "agent_fingerprint": task.agent.fingerprint.uuid_str if hasattr(task, 'agent') and hasattr(task.agent, 'fingerprint') else None,
+                "execution_time": f"{execution_time:.2f}s" if execution_time else None,
+                "error": str(event.error)
             })
-            logger.error(f"Task '{event.task.description[:50]}...' failed: {event.error}")
         
         # Tool Usage Events
         @crewai_event_bus.on(ToolUsageStartedEvent)
@@ -384,13 +498,26 @@ class CrewAILoggingListener(BaseEventListener):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         self.event_count += 1
         
+        # Add fingerprint tracking info
+        if "crew_fingerprint" in data or "agent_fingerprint" in data or "task_fingerprint" in data:
+            fingerprint = data.get("crew_fingerprint") or data.get("agent_fingerprint") or data.get("task_fingerprint")
+            data["fingerprint_info"] = self.fingerprint_registry.get(fingerprint, {}) if fingerprint else {}
+        
+        # Log the event
+        logger.info(f"[{timestamp}] Event {event_type}: {data.get('message', '')}")
+        
         # Save to file
-        with open(f"{self.log_dir}/{self.event_count:04d}_{event_type}.json", "w") as f:
-            json.dump({
-                "timestamp": timestamp,
-                "type": event_type,
-                **data
-            }, f, indent=2)
+        try:
+            # Create a unique filename with event type and count
+            filename = f"{self.log_dir}/event_{time.strftime('%Y%m%d_%H%M%S')}_{self.event_count:04d}_{event_type}.json"
+            with open(filename, "w") as f:
+                json.dump({
+                    "timestamp": timestamp,
+                    "type": event_type,
+                    **data
+                }, f, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving event log: {str(e)}")
 
 
 class ProgressTrackingListener(BaseEventListener):

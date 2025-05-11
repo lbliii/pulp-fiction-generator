@@ -8,8 +8,6 @@ from typing import Optional, List, Tuple, Any
 import typer
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.progress import Progress, SpinnerColumn, TextColumn
-import time
 
 from ..base import GenerateCommand
 from ...agents.agent_factory import AgentFactory
@@ -18,10 +16,12 @@ from ...crews.config.crew_coordinator_config import CrewCoordinatorConfig
 from ...crews.crew_executor import CrewExecutor
 from ...models.ollama_adapter import OllamaAdapter
 from ...utils.story_persistence import StoryPersistence, StoryState
-from ...story.state import StoryStateManager
+from ...story_model.state import StoryStateManager
 from ...plots import plot_registry
 from ...plugins.manager import PluginManager
 from ...plugins.base import GenrePlugin
+from ...story_generation.story_generator import StoryGenerator
+from ...story_generation.generation_config import GenerationConfig
 
 console = Console()
 
@@ -97,420 +97,206 @@ class Generate(GenerateCommand):
         ),
     ):
         """Generate a pulp fiction story in the specified genre"""
-        # Check if the genre is from a plugin
-        plugin_genre = None
-        if genre not in ["noir", "sci-fi", "adventure"]:  # Standard built-in genres
-            # Check if it's a plugin genre
-            plugin_manager = PluginManager()
-            plugin_manager.discover_plugins()
+        try:
+            # Create configuration object from CLI arguments
+            config = GenerationConfig(
+                genre=genre,
+                chapters=chapters,
+                output_file=output_file,
+                model=model,
+                title=title,
+                save_state=save_state,
+                continue_from=continue_from,
+                resume=resume,
+                plot_template=plot_template,
+                verbose=verbose,
+                chunked=chunked,
+                timeout=timeout,
+                use_yaml_crew=use_yaml_crew,
+                ollama_threads=ollama_threads,
+                ollama_gpu_layers=ollama_gpu_layers,
+                ollama_ctx_size=ollama_ctx_size,
+                ollama_batch_size=ollama_batch_size,
+                use_flow=use_flow,
+                plot_flow=plot_flow,
+                output_format=output_format
+            )
             
-            # Try to find a genre plugin with the given ID
-            genre_plugins = plugin_manager.get_plugins(GenrePlugin)
-            for plugin_class in genre_plugins:
-                if plugin_class.plugin_id == genre:
-                    plugin_genre = plugin_class
-                    if verbose:
-                        cls.info(f"Using genre plugin: {plugin_class.plugin_name}")
-                    break
+            # Validate configuration
+            cls._validate_config(config)
             
-            if not plugin_genre:
-                cls.error(f"Unknown genre: {genre}. Use 'list-genres' to see available genres.")
-                return
-        
-        # Initialize story state and state manager
+            # Initialize components
+            story_persistence = StoryPersistence(os.getenv("OUTPUT_DIR", "./output"))
+            
+            # Handle project resume or continuation
+            story_state, story_state_manager = cls._initialize_state(
+                config, story_persistence
+            )
+            
+            # Check for plugin genre
+            plugin_genre = cls._get_plugin_genre(config.genre, config.verbose)
+            
+            # Create and run the story generator
+            generator = StoryGenerator(
+                config=config,
+                story_state=story_state,
+                story_state_manager=story_state_manager,
+                story_persistence=story_persistence,
+                plugin_genre=plugin_genre
+            )
+            
+            # Display generation plan
+            cls._display_generation_plan(config, story_state)
+            
+            # Generate the story
+            result = generator.generate()
+            
+            # Handle the generation result
+            cls._handle_generation_result(
+                result, config, story_state, story_state_manager, story_persistence
+            )
+            
+            # Print continuation information
+            if config.save_state:
+                cls._print_continuation_info(story_state, story_persistence)
+                
+        except KeyboardInterrupt:
+            cls.info("Story generation interrupted.")
+            sys.exit(1)
+        except Exception as e:
+            cls.error(f"Error generating story: {str(e)}")
+            if config.verbose:
+                import traceback
+                traceback.print_exc()
+            sys.exit(1)
+    
+    @classmethod
+    def _validate_config(cls, config):
+        """Validate the generation configuration"""
+        if config.continue_from and config.resume:
+            cls.error("Cannot use both --continue and --resume options at the same time.")
+            sys.exit(1)
+            
+        if config.plot_template and not plot_registry.has_template(config.plot_template):
+            cls.error(f"Plot template '{config.plot_template}' not found. Use 'list-plots' to see available templates.")
+            sys.exit(1)
+    
+    @classmethod
+    def _initialize_state(cls, config, story_persistence):
+        """Initialize story state and state manager"""
         story_state = None
         story_state_manager = None
         
-        # Initialize story persistence
-        output_dir = os.getenv("OUTPUT_DIR", "./output")
-        story_persistence = StoryPersistence(output_dir)
-        
-        # Both continue and resume options can't be used together
-        if continue_from and resume:
-            cls.error("Cannot use both --continue and --resume options at the same time.")
-            return
-        
         # Handle project resume if specified
-        if resume:
+        if config.resume:
             try:
-                story_state = story_persistence.load_story(resume)
-                # Create a story state manager from the loaded state
+                story_state = story_persistence.load_story(config.resume)
                 story_state_manager = story_state.to_story_state_manager()
                 cls.success(f"Resuming project: {story_state.metadata.title} ({story_state.metadata.genre})")
                 cls.info(f"Project has {story_state.metadata.chapter_count} chapters and {story_state.metadata.word_count} words")
                 
                 # Update genre from the story state
-                genre = story_state.metadata.genre
+                config.genre = story_state.metadata.genre
                 
                 # If plot template is specified but different from saved, warn the user
-                if (plot_template and hasattr(story_state.metadata, 'plot_template') and 
-                    story_state.metadata.plot_template != plot_template):
-                    console.print(f"[bold yellow]Warning: Resuming with plot template '{story_state.metadata.plot_template}' from saved project, ignoring specified '{plot_template}'[/bold yellow]")
-                    plot_template = story_state.metadata.plot_template
+                if (config.plot_template and hasattr(story_state.metadata, 'plot_template') and 
+                    story_state.metadata.plot_template != config.plot_template):
+                    console.print(f"[bold yellow]Warning: Resuming with plot template '{story_state.metadata.plot_template}' from saved project, ignoring specified '{config.plot_template}'[/bold yellow]")
+                    config.plot_template = story_state.metadata.plot_template
             except (FileNotFoundError, ValueError) as e:
                 cls.error(f"Error loading project: {e}")
-                return
+                sys.exit(1)
         # Handle continuation if specified
-        elif continue_from:
+        elif config.continue_from:
             try:
-                story_state = story_persistence.load_story(continue_from)
-                # Create a story state manager from the loaded state
+                story_state = story_persistence.load_story(config.continue_from)
                 story_state_manager = story_state.to_story_state_manager()
                 cls.success(f"Continuing story: {story_state.metadata.title} ({story_state.metadata.genre})")
                 cls.info(f"Already has {story_state.metadata.chapter_count} chapters and {story_state.metadata.word_count} words")
                 
                 # Update genre from the story state
-                genre = story_state.metadata.genre
+                config.genre = story_state.metadata.genre
                 
                 # If plot template is specified but different from saved, warn the user
-                if (plot_template and hasattr(story_state.metadata, 'plot_template') and 
-                    story_state.metadata.plot_template != plot_template):
-                    console.print(f"[bold yellow]Warning: Continuing with plot template '{story_state.metadata.plot_template}' from saved story, ignoring specified '{plot_template}'[/bold yellow]")
-                    plot_template = story_state.metadata.plot_template
+                if (config.plot_template and hasattr(story_state.metadata, 'plot_template') and 
+                    story_state.metadata.plot_template != config.plot_template):
+                    console.print(f"[bold yellow]Warning: Continuing with plot template '{story_state.metadata.plot_template}' from saved story, ignoring specified '{config.plot_template}'[/bold yellow]")
+                    config.plot_template = story_state.metadata.plot_template
             except (FileNotFoundError, ValueError) as e:
                 cls.error(f"Error loading story: {e}")
-                return
+                sys.exit(1)
         else:
             # Create new story state
-            story_state = StoryState(genre, title)
+            story_state = StoryState(config.genre, config.title)
             # Create a corresponding StoryStateManager
             story_state_manager = StoryStateManager()
-            if title:
-                story_state_manager.set_project_directory(title)
+            if config.title:
+                story_state_manager.set_project_directory(config.title)
             
             # Add plot template to metadata if specified
-            if plot_template:
-                # Verify plot template exists
-                if not plot_registry.has_template(plot_template):
-                    cls.error(f"Plot template '{plot_template}' not found. Use 'list-plots' to see available templates.")
-                    return
-                story_state.metadata.plot_template = plot_template
+            if config.plot_template:
+                story_state.metadata.plot_template = config.plot_template
         
-        # Initialize Ollama model
-        ollama_adapter = OllamaAdapter.from_env(
-            model=model,
-            num_ctx=ollama_ctx_size,
-            num_gpu=ollama_gpu_layers,
-            num_thread=ollama_threads,
-            batch_size=ollama_batch_size,
-        )
-        
-        # Initialize CrewExecutor for events
-        crew_executor = CrewExecutor(debug_mode=verbose)
-        
-        # Create a progress display with Rich
-        progress_display = None
-        execution_task = None
-        token_count = 0
-        
-        # Set up progress callback for CrewAI events
-        def progress_callback(completed_tasks, total_tasks, progress, remaining):
-            nonlocal progress_display, execution_task
+        return story_state, story_state_manager
+    
+    @classmethod
+    def _get_plugin_genre(cls, genre, verbose):
+        """Check if the genre is from a plugin and return the plugin class if it is"""
+        # Only check for plugin genres if it's not one of the built-in genres
+        if genre in ["noir", "sci-fi", "adventure"]:
+            return None
             
-            if progress_display and execution_task:
-                # Update progress bar
-                if progress is not None:
-                    progress_display.update(execution_task, completed=int(progress))
-                    
-                    # Update description with estimated time
-                    if remaining:
-                        minutes = int(remaining / 60)
-                        seconds = int(remaining % 60)
-                        time_str = f"{minutes}m {seconds}s"
-                        progress_display.update(
-                            execution_task, 
-                            description=f"Generating story... {completed_tasks}/{total_tasks} tasks ({progress:.1f}%, ~{time_str} remaining)"
-                        )
-                    else:
-                        progress_display.update(
-                            execution_task, 
-                            description=f"Generating story... {completed_tasks}/{total_tasks} tasks ({progress:.1f}%)"
-                        )
+        # Check if it's a plugin genre
+        plugin_manager = PluginManager()
+        plugin_manager.discover_plugins()
         
-        # Set up token tracking for CrewAI events
-        def token_callback(source, event):
-            nonlocal token_count
-            if hasattr(event, 'tokens_used'):
-                token_count += event.tokens_used
-                if progress_display and execution_task:
-                    progress_display.update(
-                        execution_task,
-                        description=f"Generating story... (tokens: {token_count:,})"
-                    )
-        
-        # Register event listeners
-        progress_listener = crew_executor.create_custom_event_listener(callback=progress_callback)
-        token_listener = crew_executor.add_token_tracking_listener()
-        
-        # Initialize crew coordinator
-        crew_coordinator_config = CrewCoordinatorConfig(
-            debug_mode=verbose,
-            verbose=verbose,
-            process="sequential",
-        )
-        
-        agent_factory = AgentFactory(ollama_adapter)
-        crew_coordinator = CrewCoordinator(
-            agent_factory=agent_factory,
-            model_service=ollama_adapter,
-            config=crew_coordinator_config
-        )
-        
-        # Load plot template if specified
-        plot_prompt_enhancement = None
-        if hasattr(story_state.metadata, 'plot_template') and story_state.metadata.plot_template:
-            try:
-                plot_template_obj = plot_registry.get_template(story_state.metadata.plot_template)
+        # Try to find a genre plugin with the given ID
+        for plugin_class in plugin_manager.get_plugins(GenrePlugin):
+            if plugin_class.plugin_id == genre:
                 if verbose:
-                    console.print(f"[dim]Using plot template: {plot_template_obj.name} - {plot_template_obj.description}[/dim]")
-            except ValueError as e:
-                console.print(f"[bold yellow]Warning: {e}. Proceeding without plot template.[/bold yellow]")
+                    cls.info(f"Using genre plugin: {plugin_class.plugin_name}")
+                return plugin_class
         
-        # Handle plugin genre prompt enhancements if applicable
-        if plugin_genre:
-            try:
-                # Instantiate the plugin
-                genre_plugin_instance = plugin_genre()
-                
-                # Get prompt enhancers for each agent type
-                prompt_enhancers = genre_plugin_instance.get_prompt_enhancers()
-                
-                # Apply prompt enhancers to crew coordinator or agent factory as needed
-                if hasattr(crew_coordinator, 'set_prompt_enhancers'):
-                    crew_coordinator.set_prompt_enhancers(prompt_enhancers)
-                
-                if verbose:
-                    console.print(f"[dim]Applied prompt enhancers from {plugin_genre.plugin_name} plugin[/dim]")
-            except Exception as e:
-                console.print(f"[bold yellow]Warning: Error applying plugin enhancements: {e}[/bold yellow]")
-        
-        # Display generation plan to user
+        cls.error(f"Unknown genre: {genre}. Use 'list-genres' to see available genres.")
+        sys.exit(1)
+    
+    @classmethod
+    def _display_generation_plan(cls, config, story_state):
+        """Display generation plan to user"""
         console.print("\n[bold]Story Generation Plan:[/bold]")
-        console.print(f"Generation method: [cyan]{'Chunked with checkpoints' if chunked else 'Standard'}")
-        console.print(f"Genre: [cyan]{genre}[/cyan]")
-        if title:
-            console.print(f"Title: [cyan]{title}[/cyan]")
-        if plot_template and hasattr(story_state.metadata, 'plot_template'):
+        console.print(f"Generation method: [cyan]{'Chunked with checkpoints' if config.chunked else 'Standard'}")
+        console.print(f"Genre: [cyan]{config.genre}[/cyan]")
+        if config.title:
+            console.print(f"Title: [cyan]{config.title}[/cyan]")
+        if config.plot_template and hasattr(story_state.metadata, 'plot_template'):
             console.print(f"Plot template: [cyan]{story_state.metadata.plot_template}[/cyan]")
-        console.print(f"Model: [cyan]{model}[/cyan]")
-        console.print(f"Chapters to generate: [cyan]{chapters}[/cyan]")
-        
-        # Generate story chapters
-        story_text = ""
-        starting_chapter = story_state.metadata.chapter_count + 1
-        
-        try:
-            # Start a progress display
-            with Progress() as progress_display:
-                # Add a task for the current chapter
-                execution_task = progress_display.add_task(
-                    f"Generating story...", 
-                    total=100
-                )
-                
-                # Function to generate a single chapter
-                if chunked:
-                    # Chunked generation process
-                    cls.info(f"Generating {genre} story using chunked method...")
-                    
-                    # Define a callback for chunked progress updates
-                    def chunk_callback(stage, result):
-                        # Update the progress display with the current stage
-                        progress_display.update(
-                            execution_task, 
-                            description=f"Generating {stage}..."
-                        )
-                        if verbose and result:
-                            cls.info(f"Completed {stage}")
-                    
-                    # Generate using chunked approach
-                    try:
-                        results = crew_coordinator.generate_story_chunked(
-                            genre,
-                            custom_inputs=custom_inputs,
-                            chunk_callback=chunk_callback,
-                            story_state=story_state_manager,
-                            timeout_seconds=timeout
-                        )
-                        
-                        # Process results
-                        if isinstance(results, dict):
-                            result = results.get("final_story", "")
-                        elif hasattr(results, 'final_story'):
-                            result = results.final_story
-                        else:
-                            result = str(results)
-                            
-                        # Update progress to complete
-                        progress_display.update(execution_task, completed=100)
-                        
-                        # Finalize the story
-                        chapter_title = title or f"Chapter {story_state_manager.get_chapter_count() + 1}"
-                        final_content, word_count, char_count = finalize_story(
-                            genre, 
-                            result, 
-                            chapter_title,
-                            story_state_manager.get_chapter_count() + 1,
-                            story_state_manager,
-                            save_state
-                        )
-                        
-                        # Output the story
-                        if output_format.lower() == "markdown":
-                            console.print(Markdown(final_content))
-                        else:
-                            console.print(final_content)
-                            
-                        # Save to file if requested
-                        if output_file:
-                            file_path = os.path.expanduser(output_file)
-                            os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
-                            with open(file_path, "w", encoding="utf-8") as f:
-                                f.write(final_content)
-                            cls.success(f"Story saved to: {file_path}")
-                    except Exception as e:
-                        cls.error(f"Error during chunked generation: {str(e)}")
-                        if verbose:
-                            import traceback
-                            traceback.print_exc()
-                else:
-                    # Regular generation (non-chunked)
-                    # Title suffix for display
-                    title_suffix = f" ({title})" if title else ""
-                    cls.info(f"Generating {genre} story{title_suffix}...")
-                    
-                    try:
-                        # Add a fake task for token counting in regular generation
-                        token_task = progress_display.add_task(
-                            f"LLM token usage: 0", 
-                            total=None,
-                            visible=verbose
-                        )
-                        
-                        # Prepare any custom inputs from plot template
-                        custom_inputs = {}
-                        if plot_template:
-                            plot_data = plot_registry.get_template(plot_template)
-                            if plot_data:
-                                custom_inputs = plot_data.get("inputs", {})
-                                if verbose:
-                                    cls.info(f"Using plot template: {plot_template}")
-                        
-                        # Add state if we're continuing a story
-                        if story_state_manager and (resume or continue_from):
-                            custom_inputs["previous_content"] = "\n\n".join(story_state_manager.get_chapters())
-                            
-                        start_time = time.time()
-                        
-                        # Generate the story
-                        if use_flow:
-                            result = "Flow-based generation is not implemented yet"
-                        elif use_yaml_crew:
-                            result = crew_coordinator.generate_story(
-                                genre, 
-                                custom_inputs=custom_inputs,
-                                debug_mode=verbose,
-                                timeout_seconds=timeout,
-                                use_yaml_crew=True
-                            )
-                        else:
-                            result = crew_coordinator.generate_story(
-                                genre, 
-                                custom_inputs=custom_inputs,
-                                debug_mode=verbose,
-                                timeout_seconds=timeout,
-                                use_yaml_crew=False
-                            )
-                            
-                        generation_time = time.time() - start_time
-                        
-                        # Update progress to complete
-                        progress_display.update(execution_task, completed=100)
-                        
-                        # Output the generated story
-                        if result:
-                            # Finalize the story and store the content
-                            chapter_title = title or f"Chapter {story_state_manager.get_chapter_count() + 1}"
-                            final_content, word_count, char_count = finalize_story(
-                                genre, 
-                                result, 
-                                chapter_title,
-                                story_state_manager.get_chapter_count() + 1,
-                                story_state_manager,
-                                save_state
-                            )
-                            
-                            # Calculate stats
-                            tokens_per_second = token_count / generation_time if token_count > 0 and generation_time > 0 else 0
-                            words_per_second = word_count / generation_time
-                            
-                            # Print stats
-                            cls.success(f"Generated {word_count} words ({char_count} characters)")
-                            cls.info(f"Generation time: {generation_time:.2f} seconds")
-                            cls.info(f"Speed: {words_per_second:.2f} words/sec")
-                            if token_count > 0:
-                                cls.info(f"Token usage: {token_count:,} tokens ({tokens_per_second:.2f} tokens/sec)")
-                            
-                            # Output format handling
-                            if output_format.lower() == "markdown":
-                                console.print(Markdown(final_content))
-                            else:
-                                console.print(final_content)
-                                
-                            # Save to file if requested
-                            if output_file:
-                                file_path = os.path.expanduser(output_file)
-                                
-                                # Ensure the directory exists
-                                os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
-                                
-                                with open(file_path, "w", encoding="utf-8") as f:
-                                    f.write(final_content)
-                                    
-                                cls.success(f"Story saved to: {file_path}")
-                                
-                            # Save state if requested
-                            if save_state:
-                                # Update story state
-                                story_state.add_chapter(
-                                    chapter_num=story_state_manager.get_chapter_count(),
-                                    content=result,
-                                    title=chapter_title
-                                )
-                                
-                                # Save the story state
-                                story_id = story_persistence.save_story(story_state)
-                                cls.success(f"Story state saved with ID: {story_id}")
-                                
-                                # Also save in the story state manager's project directory
-                                story_state_manager.save_chapter(result, chapter_title)
-                        else:
-                            cls.error("Failed to generate story.")
-                    except Exception as e:
-                        cls.error(f"Error generating story: {str(e)}")
-                        if verbose:
-                            import traceback
-                            traceback.print_exc()
-        except KeyboardInterrupt:
-            cls.info("Story generation interrupted.")
-            sys.exit(1)
-        
+        console.print(f"Model: [cyan]{config.model}[/cyan]")
+        console.print(f"Chapters to generate: [cyan]{config.chapters}[/cyan]")
+    
+    @classmethod
+    def _handle_generation_result(cls, result, config, story_state, story_state_manager, story_persistence):
+        """Handle the generation result"""
+        if not result.success:
+            cls.error(f"Failed to generate story: {result.error}")
+            return
+            
         # Output the story
-        cls.success(f"Generated a {genre} pulp fiction story with {chapters} new chapter(s)!")
+        cls.success(f"Generated a {config.genre} pulp fiction story with {config.chapters} new chapter(s)!")
         cls.info(f"Story now has {story_state.metadata.chapter_count} total chapters and {story_state.metadata.word_count} words\n")
         
-        if output_file:
+        # Save to file if requested
+        if config.output_file:
             try:
                 # Create output directory if it doesn't exist
-                output_dir = os.path.dirname(output_file)
+                output_dir = os.path.dirname(config.output_file)
                 if output_dir and not os.path.exists(output_dir):
                     os.makedirs(output_dir)
                     
-                with open(output_file, "w") as f:
+                with open(config.output_file, "w") as f:
                     f.write(story_state.get_full_story())
-                cls.success(f"Story saved to {output_file}")
+                cls.success(f"Story saved to {config.output_file}")
             except Exception as e:
-                cls.error(f"Failed to save story to {output_file}: {e}")
+                cls.error(f"Failed to save story to {config.output_file}: {e}")
         else:
             # Always save to the project directory in markdown format
             try:
@@ -523,73 +309,25 @@ class Generate(GenerateCommand):
                 cls.success(f"Story saved to {markdown_file}")
                 
                 # Print story to console as Markdown
-                console.print(Markdown(f"# {story_state.metadata.title}\n\n{story_text}"))
+                console.print(Markdown(f"# {story_state.metadata.title}\n\n{result.story_text}"))
             except Exception as e:
                 cls.error(f"Failed to save story to project directory: {e}")
                 # Print story to console as Markdown
-                console.print(Markdown(f"# {story_state.metadata.title}\n\n{story_text}"))
-            
-        # Print continuation information
-        if save_state:
-            console.print("\n[bold]To continue this story in the future, use:[/bold]")
-            
-            # Get the project name from the story title
-            project_name = story_state.get_project_dirname()
-            
-            # Show both project resume option and specific file continue option
-            console.print(f"[cyan]pulp-fiction generate --resume {project_name} --chapters 1[/cyan]")
-            
-            # Also show the specific file option for backward compatibility
-            saved_file_path = story_persistence.save_story(story_state)
-            saved_file_name = os.path.basename(saved_file_path)
-            console.print(f"[dim]Or using the specific story file:[/dim]")
-            console.print(f"[cyan]pulp-fiction generate --continue {saved_file_name} --chapters 1[/cyan]")
-
-def finalize_story(
-    genre: str,
-    chapter_content: str,
-    title: str,
-    chapter_num: int,
-    state_manager: Any,
-    save_state: bool = True
-) -> Tuple[str, int, int]:
-    """
-    Finalize and save a generated story.
+                console.print(Markdown(f"# {story_state.metadata.title}\n\n{result.story_text}"))
     
-    Args:
-        genre: The genre of the story
-        chapter_content: The content of the chapter
-        title: The title of the story
-        chapter_num: The chapter number
-        state_manager: The state manager to use
-        save_state: Whether to save the state
+    @classmethod
+    def _print_continuation_info(cls, story_state, story_persistence):
+        """Print information about how to continue the story"""
+        console.print("\n[bold]To continue this story in the future, use:[/bold]")
         
-    Returns:
-        Tuple of (output_file, chapter_count, word_count)
-    """
-    from rich.console import Console
-    
-    # Make sure we have some content, even if just a fallback message
-    if not chapter_content or not chapter_content.strip():
-        chapter_content = f"Your {genre} story titled '{title}' could not be generated due to technical issues. The CrewFactory is experiencing problems with the 'custom_inputs' parameter. Please check the code and fix the issue."
+        # Get the project name from the story title
+        project_name = story_state.get_project_dirname()
         
-    # Save the chapter to state manager
-    if state_manager:
-        # Add chapter to state
-        state_manager.add_chapter(chapter_num, chapter_content)
+        # Show both project resume option and specific file continue option
+        console.print(f"[cyan]pulp-fiction generate --resume {project_name} --chapters 1[/cyan]")
         
-        # Save state if requested
-        if save_state:
-            from time import strftime
-            timestamp = strftime("%Y%m%d%H%M%S")
-            state_file = f"{title.lower().replace(' ', '_')}_{timestamp}.json"
-            state_manager.save_state(state_file)
-    
-    # Calculate chapter count and word count
-    chapter_count = 1  # Assuming one chapter
-    word_count = len(chapter_content.split())  # Simple word count
-    
-    # Construct output file path
-    output_file = f"{title.lower().replace(' ', '_')}_{chapter_num}.txt"
-    
-    return output_file, chapter_count, word_count 
+        # Also show the specific file option for backward compatibility
+        saved_file_path = story_persistence.save_story(story_state)
+        saved_file_name = os.path.basename(saved_file_path)
+        console.print(f"[dim]Or using the specific story file:[/dim]")
+        console.print(f"[cyan]pulp-fiction generate --continue {saved_file_name} --chapters 1[/cyan]") 

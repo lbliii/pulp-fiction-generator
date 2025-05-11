@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import Mock, MagicMock, patch
 
 from pulp_fiction_generator.story import StoryGenerator, StoryArtifacts
-from pulp_fiction_generator.story.tasks import TaskFactory
+from pulp_fiction_generator.story_model.tasks import TaskFactory
 from pulp_fiction_generator.crews import CrewFactory
 from pulp_fiction_generator.agents import AgentFactory
 

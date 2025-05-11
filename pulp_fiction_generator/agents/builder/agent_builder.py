@@ -2,8 +2,9 @@
 Builder for creating Agent instances.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from crewai import Agent
+from crewai.security import Fingerprint
 
 from ...models.model_service import ModelService
 from ...models.crewai_adapter import CrewAIModelAdapter
@@ -30,13 +31,14 @@ class AgentBuilder:
         # Create a CrewAI-compatible wrapper for the model service
         self.crewai_model = CrewAIModelAdapter(ollama_adapter=model_service)
     
-    def build_agent(self, config: Dict[str, Any], verbose: bool = False) -> Agent:
+    def build_agent(self, config: Dict[str, Any], verbose: bool = False, deterministic_id: Optional[str] = None) -> Agent:
         """
         Build an agent from a configuration.
         
         Args:
             config: Agent configuration
             verbose: Whether to enable verbose output
+            deterministic_id: Optional ID string for creating deterministic fingerprints
             
         Returns:
             Configured Agent instance
@@ -61,7 +63,8 @@ class AgentBuilder:
         # Load knowledge sources if specified
         knowledge_sources = KnowledgeLoader.load_sources(config.get("knowledge_sources"))
         
-        return Agent(
+        # Create the agent
+        agent = Agent(
             # Core attributes
             role=config["role"],
             goal=config["goal"],
@@ -104,6 +107,76 @@ class AgentBuilder:
             # Miscellaneous
             cache=config.get("cache", True)
         )
+        
+        # Enhance fingerprint with metadata if we're using deterministic IDs
+        if deterministic_id:
+            # Create a deterministic fingerprint for the agent
+            # This would replace the auto-generated one, but not possible directly
+            # So we'll add it to the metadata instead
+            deterministic_fingerprint = Fingerprint.generate(seed=deterministic_id)
+            self._enhance_fingerprint_metadata(agent, {
+                "deterministic_id": deterministic_id,
+                "deterministic_uuid": deterministic_fingerprint.uuid_str
+            })
+        
+        # Add metadata to the fingerprint
+        self._enhance_fingerprint_metadata(agent, {
+            "role": agent_role,
+            "goal": agent_goal,
+            "genre": genre if genre else "unknown",
+            "agent_type": self._infer_agent_type(agent_role),
+        })
+        
+        return agent
+    
+    def _enhance_fingerprint_metadata(self, agent: Agent, metadata: Dict[str, Any]) -> None:
+        """
+        Enhance an agent's fingerprint with additional metadata.
+        
+        Args:
+            agent: Agent instance
+            metadata: Metadata to add to the fingerprint
+        """
+        # Access the fingerprint
+        fingerprint = agent.security_config.fingerprint
+        
+        # Get existing metadata or initialize empty dict
+        existing_metadata = fingerprint.metadata or {}
+        
+        # Update with new metadata
+        existing_metadata.update(metadata)
+        
+        # Set the updated metadata
+        fingerprint.metadata = existing_metadata
+    
+    def _infer_agent_type(self, role: str) -> str:
+        """
+        Infer the agent type from its role.
+        
+        Args:
+            role: The agent's role
+            
+        Returns:
+            Inferred agent type
+        """
+        role_lower = role.lower()
+        
+        if any(term in role_lower for term in ["world", "setting", "environment"]):
+            return "worldbuilding"
+        elif any(term in role_lower for term in ["research", "investigate", "analyze"]):
+            return "research"
+        elif any(term in role_lower for term in ["character", "protagonist", "antagonist"]):
+            return "character"
+        elif any(term in role_lower for term in ["plot", "outline", "structure"]):
+            return "plotting"
+        elif any(term in role_lower for term in ["write", "author", "storytell"]):
+            return "writing"
+        elif any(term in role_lower for term in ["edit", "review", "feedback"]):
+            return "editing"
+        elif any(term in role_lower for term in ["manage", "coordinate", "plan"]):
+            return "management"
+        else:
+            return "general"
     
     def _get_specialized_llm(self, role: str, goal: str, genre: str = None) -> Any:
         """

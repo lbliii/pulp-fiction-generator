@@ -19,6 +19,24 @@ from .commands import *
 # Type for command functions that have name and help attributes
 CommandFunction = Callable[..., Any]
 
+# Define aliases for common commands
+COMMAND_ALIASES = {
+    "g": "generate",
+    "gen": "generate",
+    "t": "templates",
+    "tpl": "templates",
+    "st": "stats",
+    "stat": "stats",
+    "ls": "list-projects",
+    "projects": "list-projects",
+    "genres": "list-genres",
+    "plugins": "list-plugins",
+    "c": "config",
+    "conf": "config",
+    "m": "memory",
+    "f": "flow",
+}
+
 class CommandRegistry:
     """Registry for CLI commands in the Pulp Fiction Generator."""
     
@@ -47,6 +65,10 @@ class CommandRegistry:
             if not name:
                 # Skip commands without a name
                 return
+            
+            # Convert underscore name to hyphenated format
+            if "_" in name:
+                name = name.replace("_", "-")
                 
             # Special handling for GenerateCommand which has its own run method
             if issubclass(command, GenerateCommand):
@@ -67,15 +89,52 @@ class CommandRegistry:
         # If it's a Typer application
         elif isinstance(command, typer.Typer):
             if name:
+                # Convert underscore name to hyphenated format
+                if "_" in name:
+                    name = name.replace("_", "-")
                 self.app.add_typer(command, name=name)
                 self.commands[name] = command
         # If it's a function with name and help attributes
         elif callable(command) and hasattr(command, "name") and hasattr(command, "help"):
             cmd_name = name or command.name
+            # Convert underscore name to hyphenated format
+            if "_" in cmd_name:
+                cmd_name = cmd_name.replace("_", "-")
             self.app.command(name=cmd_name, help=command.help)(command)
             self.commands[cmd_name] = command
         else:
             raise TypeError("Command must be a BaseCommand subclass, a Typer app, or a function with name and help attributes")
+
+    def register_alias(self, alias: str, target_command: str) -> None:
+        """
+        Register an alias for an existing command.
+        
+        Args:
+            alias: The alias name
+            target_command: The target command name
+        """
+        if target_command not in self.commands:
+            # Skip if target command doesn't exist
+            return
+            
+        target = self.commands[target_command]
+        
+        # Handle different types of commands
+        if inspect.isclass(target) and issubclass(target, BaseCommand):
+            # For BaseCommand subclasses, create a function to call run
+            @self.app.command(name=alias, help=f"Alias for '{target_command}' - {target.help}")
+            def alias_wrapper(**kwargs):
+                return target.run(**kwargs)
+        elif isinstance(target, typer.Typer):
+            # For Typer apps, add a callback to forward to the target app
+            self.app.add_typer(target, name=alias)
+        elif callable(target) and not inspect.isclass(target):
+            # For function commands, create a wrapper function
+            @self.app.command(name=alias, help=f"Alias for '{target_command}'")
+            def alias_wrapper(**kwargs):
+                return target(**kwargs)
+                
+        self.commands[alias] = target
 
     def discover_commands(self) -> None:
         """Discover and register commands from the commands package."""
@@ -88,14 +147,21 @@ class CommandRegistry:
             if cmd:
                 # If it's a Typer app
                 if isinstance(cmd, typer.Typer):
-                    self.register(cmd, name=cmd_name.lower())
+                    # Convert underscore name to hyphenated format
+                    display_name = cmd_name.lower()
+                    if "_" in display_name:
+                        display_name = display_name.replace("_", "-")
+                    self.register(cmd, name=display_name)
                 # If it's a BaseCommand subclass
                 elif inspect.isclass(cmd) and issubclass(cmd, BaseCommand):
                     self.register(cmd)
                 # If it's a function (for simpler commands)
                 elif callable(cmd) and not inspect.isclass(cmd):
                     # For simple function commands, add them directly to the app
-                    self.app.command(name=cmd_name.lower())(cmd)
+                    display_name = cmd_name.lower()
+                    if "_" in display_name:
+                        display_name = display_name.replace("_", "-")
+                    self.app.command(name=display_name)(cmd)
         
         # Register the flow command
         if "flow_command" in globals():
@@ -105,8 +171,17 @@ class CommandRegistry:
                 help="Flow-based story generation commands"
             )
 
+        # Register command aliases
+        self._register_aliases()
+
         # Discover plugins
         self._discover_plugin_commands()
+    
+    def _register_aliases(self) -> None:
+        """Register aliases for commonly used commands."""
+        for alias, target in COMMAND_ALIASES.items():
+            if target in self.commands:
+                self.register_alias(alias, target)
     
     def _discover_plugin_commands(self) -> None:
         """

@@ -90,6 +90,11 @@ class BaseCommand(ABC):
     def info(message: str) -> None:
         """Display an info message"""
         console.print(f"[blue]{message}[/blue]")
+    
+    @staticmethod
+    def warning(message: str) -> None:
+        """Display a warning message"""
+        console.print(f"[bold yellow]Warning:[/bold yellow] {message}")
 
 
 class GenerateCommand(BaseCommand):
@@ -99,7 +104,17 @@ class GenerateCommand(BaseCommand):
     @with_error_handling
     def run(cls, **kwargs) -> Any:
         """Run the command with error handling"""
-        return cls._run_impl(**kwargs)
+        # Filter out any None values where they're optional
+        # This ensures options work properly even when not specified
+        filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None or k in cls._required_params()}
+        return cls._run_impl(**filtered_kwargs)
+    
+    @classmethod
+    def _required_params(cls) -> List[str]:
+        """Get a list of required parameters for the command"""
+        # Default implementation returns an empty list
+        # Subclasses can override this to specify which parameters are required
+        return []
     
     @classmethod
     @abstractmethod

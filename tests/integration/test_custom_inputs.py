@@ -24,7 +24,7 @@ from pulp_fiction_generator.agents import AgentFactory
 from pulp_fiction_generator.models.ollama_adapter import OllamaAdapter
 from pulp_fiction_generator.crews import CrewCoordinator
 from pulp_fiction_generator.utils.story_persistence import StoryPersistence, StoryState, StoryMetadata
-from pulp_fiction_generator.story.models import StoryArtifacts  # Keep this import as it might be used elsewhere
+from pulp_fiction_generator.story_model.models import StoryArtifacts  # Keep this import as it might be used elsewhere
 
 def main():
     """Main test function."""
