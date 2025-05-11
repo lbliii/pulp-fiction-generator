@@ -1,0 +1,46 @@
+# Agent configuration file for Pulp Fiction Generator
+#
+# This file defines the agents used in the story generation process
+# Each agent has a unique role and capabilities
+
+agents:
+  - id: author
+    name: "Pulp Fiction Author"
+    goal: "Write a compelling pulp fiction story in the specified genre"
+    backstory: "An experienced pulp fiction author with expertise in creating engaging narratives"
+    llm:
+      model: "llama3.2"
+      temperature: 0.7
+      max_tokens: 2000
+    tools:
+      - "file_read"
+      - "file_write"
+      - "directory_read"
+    
+  - id: editor
+    name: "Story Editor"
+    goal: "Review, refine, and enhance the story for quality and genre consistency"
+    backstory: "A detail-oriented editor with deep knowledge of pulp fiction conventions"
+    llm:
+      model: "llama3.2"
+      temperature: 0.5
+      max_tokens: 1000
+    tools:
+      - "file_read"
+      - "file_write"
+      - "directory_read"
+    
+  - id: planner
+    name: "Story Planner" 
+    goal: "Structure the story with coherent plot points and character development"
+    backstory: "A meticulous planner who excels at crafting logical and engaging story arcs"
+    llm:
+      model: "llama3.2"
+      temperature: 0.6
+      max_tokens: 1500
+    tools:
+      - "file_read"
+      - "file_write"
+      - "directory_read"
+      - "web_search"
+      - "rag" 

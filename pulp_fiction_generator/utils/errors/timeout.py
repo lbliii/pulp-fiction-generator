@@ -8,8 +8,10 @@ with different implementations based on the platform.
 import signal
 import threading
 import time
+import platform
 from contextlib import contextmanager
 import logging
+import sys
 
 from .exceptions import TimeoutError
 
@@ -37,8 +39,8 @@ class TimeoutManager:
         Raises:
             TimeoutError: If the operation times out
         """
-        # For Unix-like systems, use signal-based timeout
-        if hasattr(signal, 'SIGALRM'):
+        # For Unix-like systems (but not macOS), use signal-based timeout
+        if hasattr(signal, 'SIGALRM') and platform.system() != 'Darwin':
             def timeout_handler(signum, frame):
                 raise TimeoutError(f"Function call timed out after {seconds} seconds")
             
@@ -53,41 +55,48 @@ class TimeoutManager:
                 signal.alarm(0)
                 signal.signal(signal.SIGALRM, original_handler)
         
-        # For Windows or other systems without SIGALRM, use thread-based timeout
+        # For Windows, macOS or other systems without SIGALRM, use thread-based timeout
         else:
-            timer = None
-            timeout_occurred = False
-            main_thread = threading.current_thread()
+            # Use an event for better synchronization
+            completed = threading.Event()
             
-            def timeout_thread():
-                nonlocal timeout_occurred
+            def check_timeout():
+                """Thread that checks if the operation has timed out"""
                 start_time = time.time()
-                # Wait for the timeout to occur
-                while time.time() - start_time < seconds:
-                    time.sleep(0.1)
-                    # If the main operation completed, the timer will be set to None
-                    if timer is None:
-                        return
-                # If we got here, the timeout occurred
-                timeout_occurred = True
-                logger.warning(f"Operation timed out after {seconds} seconds")
-                # Try to raise a TimeoutError in the main thread
-                # Note: This might not be effective on all platforms
-                if hasattr(main_thread, "_thread__stop"):
-                    main_thread._thread__stop()
+                
+                # Wait either for completion or timeout
+                while not completed.is_set() and time.time() - start_time < seconds:
+                    # Check every 0.1 seconds
+                    completed.wait(0.1)
+                
+                # If completed was not set, then we timed out
+                if not completed.is_set():
+                    logger.warning(f"Operation timed out after {seconds} seconds")
+                    # Since we can't reliably interrupt the main thread on all platforms,
+                    # we'll record the timeout and let the main thread handle it
+                    check_timeout.timed_out = True
+            
+            # Initialize the flag
+            check_timeout.timed_out = False
             
             # Start the timeout thread
-            timer = threading.Thread(target=timeout_thread)
-            timer.daemon = True
-            timer.start()
+            timer_thread = threading.Thread(target=check_timeout)
+            timer_thread.daemon = True
+            timer_thread.start()
             
             try:
                 yield
             finally:
-                # Mark timer as completed
-                timer = None
-                if timeout_occurred:
-                    raise TimeoutError(f"Operation timed out after {seconds} seconds")
+                # Set the completion event to stop the timer thread
+                completed.set()
+                
+                # Wait for the timer thread to finish
+                timer_thread.join(0.5)  # Wait up to 0.5s for the thread to finish
+                
+                # Check if we timed out
+                if check_timeout.timed_out:
+                    logger.error(f"Function call timed out after {seconds} seconds")
+                    raise TimeoutError(f"Function call timed out after {seconds} seconds")
 
 
 # Alias for convenience

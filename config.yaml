@@ -36,6 +36,25 @@ cache:
   cache_dir: "./.cache"
   max_cache_size: 1024  # MB
 
+# Memory settings
+memory:
+  enable: true
+  storage_dir: "./.memory"  # Custom storage directory for memory files
+  # Memory component configuration
+  long_term:
+    enabled: true
+    db_path: "long_term_memory.db"  # Relative to storage_dir
+  short_term:
+    enabled: true 
+    provider: "rag"  # Using RAG for short-term memory
+  entity:
+    enabled: true
+    track_entities: true  # Enable tracking of entities in stories
+  # Embedding configuration
+  embedder:
+    provider: "openai"  # Options: openai, ollama, google, etc.
+    model: "text-embedding-3-small"  # For OpenAI embeddings
+
 # Plugin-specific configurations can be added here
 # Example: Western genre plugin configuration
 western-genre:

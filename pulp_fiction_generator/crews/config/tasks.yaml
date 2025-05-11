@@ -1,0 +1,32 @@
+# Task configuration file for Pulp Fiction Generator
+#
+# This file defines the sequence of tasks for story generation
+# Each task is assigned to a specific agent with necessary context
+
+tasks:
+  - id: plan_story
+    description: "Create a cohesive story outline with plot points, characters, and settings"
+    agent: planner
+    expected_output: plot_outline
+    dependencies: []
+    
+  - id: write_chapter
+    description: "Write a full chapter based on the story outline and genre conventions"
+    agent: author
+    expected_output: chapter_text
+    dependencies:
+      - plan_story
+    
+  - id: edit_chapter
+    description: "Review and refine the chapter for quality, consistency, and adherence to genre"
+    agent: editor
+    expected_output: edited_chapter
+    dependencies:
+      - write_chapter
+    
+  - id: finalize_story
+    description: "Compile all chapters and ensure the story flows cohesively"
+    agent: editor
+    expected_output: final_story
+    dependencies:
+      - edit_chapter 

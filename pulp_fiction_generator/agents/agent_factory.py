@@ -143,14 +143,16 @@ class AgentFactory:
         """
         return self.support_factory.create_editor(genre, config)
     
-    def create_agent(self, agent_type: str, genre: str, config: Optional[Dict[str, Any]] = None) -> Agent:
+    def create_agent(self, agent_type: str = None, genre: str = None, config: Optional[Dict[str, Any]] = None, role: str = None, tools: Optional[List[str]] = None) -> Agent:
         """
         Create an agent of the specified type.
         
         Args:
-            agent_type: Type of agent to create
+            agent_type: Type of agent to create (deprecated, use role instead)
             genre: Genre for the agent
             config: Optional configuration overrides
+            role: Role of the agent (alternative to agent_type)
+            tools: Optional list of tools to provide to the agent
             
         Returns:
             A configured agent of the specified type
@@ -158,6 +160,15 @@ class AgentFactory:
         Raises:
             ValueError: If the agent type is not recognized
         """
+        # Use role if provided, otherwise fall back to agent_type
+        agent_role = role or agent_type
+        
+        if not agent_role:
+            raise ValueError("Either 'role' or 'agent_type' must be provided")
+            
+        if not genre:
+            raise ValueError("Genre must be provided")
+        
         create_methods = {
             "researcher": self.create_researcher,
             "worldbuilder": self.create_worldbuilder,
@@ -167,7 +178,14 @@ class AgentFactory:
             "editor": self.create_editor
         }
         
-        if agent_type not in create_methods:
-            raise ValueError(f"Unknown agent type: {agent_type}. Valid types: {', '.join(create_methods.keys())}")
+        if agent_role not in create_methods:
+            raise ValueError(f"Unknown agent type: {agent_role}. Valid types: {', '.join(create_methods.keys())}")
+        
+        # Create a copy of the config to avoid modifying the original
+        config_copy = {**(config or {})}
+        
+        # Add tools to config if provided
+        if tools:
+            config_copy["tools"] = tools
             
-        return create_methods[agent_type](genre, config) 
+        return create_methods[agent_role](genre, config_copy) 

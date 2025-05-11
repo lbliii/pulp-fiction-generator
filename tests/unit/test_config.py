@@ -93,8 +93,14 @@ class TestConfig:
         assert config.ollama.host == "http://localhost:11434"
         assert config.generation.temperature == 0.7
     
-    def test_config_validation(self):
+    def test_config_validation(self, monkeypatch):
         """Test configuration validation."""
+        # Mock Path.exists to always return True for directory checks
+        original_exists = Path.exists
+        def mock_exists(self):
+            return True
+        monkeypatch.setattr(Path, "exists", mock_exists)
+        
         config = Config()
         
         # Valid configuration should have no errors

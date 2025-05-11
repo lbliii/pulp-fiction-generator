@@ -1,168 +1,166 @@
 """
-Command registry for Pulp Fiction Generator CLI.
+CLI command registry for Pulp Fiction Generator.
 """
 
-from typing import Dict, List, Type, Optional, Union, Callable, Any
+from typing import Dict, List, Optional, Type, Union, Callable, Any
+import typer
 import inspect
 import importlib
+import importlib.util
 import pkgutil
-import typer
-from typer.models import CommandInfo
+import sys
+import os
+from pathlib import Path
 
 from .base import BaseCommand, command_callback, GenerateCommand
+from .commands import __all__ as command_modules
+from .commands import *
 
 # Type for command functions that have name and help attributes
 CommandFunction = Callable[..., Any]
 
 class CommandRegistry:
-    """Registry for CLI commands"""
+    """Registry for CLI commands in the Pulp Fiction Generator."""
     
     def __init__(self):
-        self.commands: Dict[str, Union[Type[BaseCommand], typer.Typer, CommandFunction]] = {}
-        self.app = typer.Typer(help="Pulp Fiction Generator")
+        """Initialize the command registry."""
+        # Create the main application
+        self.app = typer.Typer(help="Pulp Fiction Generator CLI")
+        self.commands: Dict[str, Union[BaseCommand, typer.Typer]] = {}
         
         # Set to keep track of registered commands to avoid duplicates
         self._registered_modules = set()
     
-    def register(self, command: Union[Type[BaseCommand], typer.Typer, CommandFunction], name: Optional[str] = None) -> None:
-        """Register a command class, Typer app, or function with name/help attributes"""
-        if isinstance(command, type) and issubclass(command, BaseCommand):
-            # Register a class-based command
-            command_name = command.name
-            
-            # Skip if already registered
-            if command_name in self.commands:
+    def register(self, command: Union[BaseCommand, typer.Typer, CommandFunction], name: Optional[str] = None) -> None:
+        """
+        Register a command with the CLI application.
+        
+        Args:
+            command: The command to register
+            name: Optional name for the command
+        """
+        # If it's a BaseCommand subclass (not instance), instantiate it
+        if inspect.isclass(command) and issubclass(command, BaseCommand):
+            if hasattr(command, 'name'):
+                name = name or command.name
+                
+            if not name:
+                # Skip commands without a name
                 return
-            
-            self.commands[command_name] = command
-            
-            # Special handling for GenerateCommand which needs parameter preservation
+                
+            # Special handling for GenerateCommand which has its own run method
             if issubclass(command, GenerateCommand):
                 # Use direct registration with the original signature
                 run_method = command._run_impl
-                # Get the signature and preserve parameter defaults and annotations
-                sig = inspect.signature(run_method)
                 
-                # Define a wrapper function that preserves the signature
-                # This is actually registered with typer
-                @self.app.command(name=command_name, help=command.help)
-                def generate_wrapper(**kwargs):
+                # Register with Typer using the command name
+                @self.app.command(name=name, help=command.help)
+                def command_wrapper(**kwargs):
                     return command.run(**kwargs)
-                
-                # Try to copy signature metadata
-                generate_wrapper.__signature__ = sig
-                generate_wrapper.__annotations__ = getattr(run_method, "__annotations__", {})
-                generate_wrapper.__defaults__ = getattr(run_method, "__defaults__", None)
-                
+                    
+                self.commands[name] = command
             else:
-                # Standard command handling
-                # Create a callback for the command
-                callback = command_callback(command)
+                # For other BaseCommand classes, call their run method
+                self.app.command(name=name, help=command.help)(command.run)
+                self.commands[name] = command
                 
-                # Set properties on the callback for documentation
-                callback.__name__ = command.name
-                callback.__doc__ = command.help
-                
-                # Register with Typer
-                self.app.command(name=command_name, help=command.help)(callback)
-            
+        # If it's a Typer application
         elif isinstance(command, typer.Typer):
-            # Register a sub-Typer app
-            command_name = name or getattr(command, "name", None)
-            if not command_name:
-                raise ValueError("Command name is required for Typer app registration")
-            
-            # Skip if already registered
-            if command_name in self.commands:
-                return
-                
-            self.commands[command_name] = command
-            
-            # Register sub-app with main app
-            self.app.add_typer(command, name=command_name)
-            
+            if name:
+                self.app.add_typer(command, name=name)
+                self.commands[name] = command
+        # If it's a function with name and help attributes
         elif callable(command) and hasattr(command, "name") and hasattr(command, "help"):
-            # Register a function with name and help attributes
-            command_name = command.name
-            command_help = command.help
-            
-            # Skip if already registered
-            if command_name in self.commands:
-                return
-                
-            self.commands[command_name] = command
-            
-            # Register the function directly
-            self.app.command(name=command_name, help=command_help)(command)
-            
+            cmd_name = name or command.name
+            self.app.command(name=cmd_name, help=command.help)(command)
+            self.commands[cmd_name] = command
         else:
             raise TypeError("Command must be a BaseCommand subclass, a Typer app, or a function with name and help attributes")
-    
-    def discover_commands(self, package_name: str = "pulp_fiction_generator.cli.commands") -> None:
-        """Discover and register commands in the specified package"""
-        # Skip if this package has already been processed
-        if package_name in self._registered_modules:
-            return
+
+    def discover_commands(self) -> None:
+        """Discover and register commands from the commands package."""
+        # Register the commands from the command_modules
+        for cmd_name in command_modules:
+            # Get the module or class
+            cmd = globals().get(cmd_name)
             
-        # Add to tracked modules
-        self._registered_modules.add(package_name)
+            # Handle different types of commands
+            if cmd:
+                # If it's a Typer app
+                if isinstance(cmd, typer.Typer):
+                    self.register(cmd, name=cmd_name.lower())
+                # If it's a BaseCommand subclass
+                elif inspect.isclass(cmd) and issubclass(cmd, BaseCommand):
+                    self.register(cmd)
+                # If it's a function (for simpler commands)
+                elif callable(cmd) and not inspect.isclass(cmd):
+                    # For simple function commands, add them directly to the app
+                    self.app.command(name=cmd_name.lower())(cmd)
         
-        try:
-            package = importlib.import_module(package_name)
+        # Register the flow command
+        if "flow_command" in globals():
+            self.app.add_typer(
+                globals()["flow_command"], 
+                name="flow",
+                help="Flow-based story generation commands"
+            )
+
+        # Discover plugins
+        self._discover_plugin_commands()
+    
+    def _discover_plugin_commands(self) -> None:
+        """
+        Discover commands from plugins.
+        
+        This looks for plugins that might provide additional commands
+        to extend the CLI functionality.
+        """
+        # Get the plugins directory
+        plugins_dir = os.getenv("PLUGINS_DIR", "./plugins")
+        
+        # Skip if the directory doesn't exist
+        if not os.path.isdir(plugins_dir):
+            return
+        
+        # Import commands from plugins
+        sys.path.append(plugins_dir)
+        
+        # Look for plugin modules with commands
+        for plugin_file in Path(plugins_dir).glob("*/commands.py"):
+            try:
+                # Import the module
+                spec = importlib.util.spec_from_file_location(
+                    f"plugin_commands_{plugin_file.parent.name}",
+                    plugin_file
+                )
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                
+                # Register any commands in the module
+                for attr_name in dir(module):
+                    attr = getattr(module, attr_name)
+                    
+                    # Register BaseCommand subclasses
+                    if inspect.isclass(attr) and issubclass(attr, BaseCommand) and attr is not BaseCommand:
+                        self.register(attr)
+                    
+                    # Register Typer apps
+                    elif isinstance(attr, typer.Typer):
+                        # Use the module name as a namespace
+                        namespace = plugin_file.parent.name
+                        self.register(attr, name=f"{namespace}_{attr_name}")
             
-            for _, name, is_pkg in pkgutil.iter_modules(package.__path__, package.__name__ + '.'):
-                if is_pkg:
-                    self.discover_commands(name)
-                else:
-                    # Skip if this module has already been processed
-                    if name in self._registered_modules:
-                        continue
-                        
-                    # Add to tracked modules
-                    self._registered_modules.add(name)
-                    
-                    module = importlib.import_module(name)
-                    
-                    # Check for direct command functions in the module
-                    for item_name in dir(module):
-                        item = getattr(module, item_name)
-                        if callable(item) and hasattr(item, "name") and hasattr(item, "help"):
-                            self.register(item)
-                    
-                    # Check for Typer apps in the module
-                    for item_name in dir(module):
-                        item = getattr(module, item_name)
-                        if isinstance(item, typer.Typer):
-                            # Get the command name from attributes, the callback, or the module name
-                            app_name = getattr(item, "name", None)
-                            
-                            if not app_name and hasattr(item, "registered_callback") and item.registered_callback:
-                                for callback in item.registered_callback:
-                                    if hasattr(callback, "name"):
-                                        app_name = callback.name
-                                        break
-                            
-                            if not app_name:
-                                # Try to get the name from module name (turn list_genres into list-genres)
-                                module_parts = name.split('.')
-                                module_name = module_parts[-1]
-                                app_name = module_name.replace('_', '-')
-                                
-                            # Register the Typer app
-                            self.register(item, app_name)
-                            
-                    # Also check for BaseCommand classes
-                    for item_name in dir(module):
-                        item = getattr(module, item_name)
-                        if (inspect.isclass(item) and 
-                            issubclass(item, BaseCommand) and 
-                            item is not BaseCommand and
-                            hasattr(item, 'name') and
-                            item.name):
-                            self.register(item)
-        except (ImportError, AttributeError) as e:
-            print(f"Error discovering commands in {package_name}: {e}")
+            except Exception as e:
+                # Skip problematic plugins
+                print(f"Error loading plugin commands from {plugin_file}: {e}")
+                continue
+                
     
     def get_app(self) -> typer.Typer:
-        """Get the configured Typer app"""
+        """
+        Get the configured application.
+        
+        Returns:
+            The configured typer application
+        """
         return self.app 

@@ -21,20 +21,24 @@ def test_ollama_direct(model="llama3.2"):
             models = response.json().get("models", [])
             print(f"✓ Connected to Ollama API: Found {len(models)} models")
             
-            # Check if our model exists
-            model_found = any(m.get("name") == model for m in models)
+            # Check if our model exists - allow for model:latest format
+            model_found = any(m.get("name").startswith(model) for m in models)
             if model_found:
                 print(f"✓ Model '{model}' found in Ollama")
+                model_name = next(m.get("name") for m in models if m.get("name").startswith(model))
+                print(f"Using model: {model_name}")
+                # Update model name for actual test
+                model = model_name
             else:
                 print(f"✗ Model '{model}' NOT found in Ollama")
                 print(f"Available models: {', '.join(m.get('name') for m in models)}")
-                return False
+                assert False, f"Model '{model}' not found in Ollama"
         else:
             print(f"✗ Failed to connect to Ollama API: {response.status_code} - {response.text}")
-            return False
+            assert False, f"Failed to connect to Ollama API: {response.status_code}"
     except Exception as e:
         print(f"✗ Connection to Ollama API failed: {e}")
-        return False
+        assert False, f"Connection to Ollama API failed: {e}"
     
     # Now test a simple generation
     try:
@@ -59,13 +63,13 @@ def test_ollama_direct(model="llama3.2"):
             print(f"✓ Generation successful in {duration:.2f} seconds")
             print(f"Prompt: {prompt}")
             print(f"Response: {response_text}")
-            return True
+            assert True
         else:
             print(f"✗ Generation failed: {response.status_code} - {response.text}")
-            return False
+            assert False, f"Generation failed: {response.status_code}"
     except Exception as e:
         print(f"✗ Generation request failed: {e}")
-        return False
+        assert False, f"Generation request failed: {e}"
 
 def main():
     parser = argparse.ArgumentParser(description="Test Ollama API directly")
@@ -73,7 +77,13 @@ def main():
                       help="Model to test (default: llama3.2-optimized)")
     args = parser.parse_args()
     
-    success = test_ollama_direct(args.model)
+    try:
+        test_ollama_direct(args.model)
+        success = True
+    except AssertionError as e:
+        print(f"Test failed: {e}")
+        success = False
+    
     return 0 if success else 1
 
 if __name__ == "__main__":

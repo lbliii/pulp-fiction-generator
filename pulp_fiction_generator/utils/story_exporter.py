@@ -14,6 +14,13 @@ import json
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
+# Try to import CrewAI tools
+try:
+    from crewai_tools import FileWriteTool
+    CREWAI_TOOLS_AVAILABLE = True
+except ImportError:
+    CREWAI_TOOLS_AVAILABLE = False
+
 class StoryExporter:
     """Exports generated stories to various formats."""
     
@@ -26,6 +33,11 @@ class StoryExporter:
         """
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
+        
+        # Initialize FileWriteTool if available
+        self.file_write_tool = None
+        if CREWAI_TOOLS_AVAILABLE:
+            self.file_write_tool = FileWriteTool()
     
     def _sanitize_filename(self, title: str) -> str:
         """
@@ -42,6 +54,20 @@ class StoryExporter:
         # Replace multiple spaces with a single space, then replace spaces with underscores
         safe_name = re.sub(r'\s+', ' ', safe_name).replace(' ', '_')
         return safe_name
+    
+    def _write_to_file(self, filepath: str, content: str) -> None:
+        """
+        Write content to a file using FileWriteTool if available.
+        
+        Args:
+            filepath: Path to the file
+            content: Content to write
+        """
+        if CREWAI_TOOLS_AVAILABLE and self.file_write_tool:
+            self.file_write_tool.write(filepath, content)
+        else:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(content)
     
     def export_to_markdown(self, story_data: Dict[str, Any], filename: Optional[str] = None) -> str:
         """
@@ -91,8 +117,7 @@ class StoryExporter:
         
         # Write to file
         filepath = os.path.join(self.output_dir, f"{filename}.md")
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(md_content)
+        self._write_to_file(filepath, md_content)
         
         return filepath
     
@@ -221,8 +246,7 @@ class StoryExporter:
         
         # Write to file
         filepath = os.path.join(self.output_dir, f"{filename}.html")
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(html_content)
+        self._write_to_file(filepath, html_content)
         
         return filepath
     
@@ -307,8 +331,7 @@ class StoryExporter:
         
         # Write to file
         filepath = os.path.join(self.output_dir, f"{filename}.txt")
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(text_content)
+        self._write_to_file(filepath, text_content)
         
         return filepath
     

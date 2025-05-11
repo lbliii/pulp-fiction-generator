@@ -13,8 +13,84 @@ This project uses CrewAI and Ollama (with Llama 3.2) to create a local, cost-eff
 - **Genre Flexibility**: Supports various pulp fiction genres (noir, sci-fi, adventure, etc.)
 - **Serialized Output**: Creates stories that can continue across multiple sessions
 - **Modular Architecture**: Easy to extend with new capabilities
+- **Enhanced Agent Tools**: Integrated with CrewAI tools for web search, file operations, and RAG capabilities
+- **Advanced Memory System**: Comprehensive memory system for maintaining context across story generations
 
 ## New Features
+
+### Enhanced Memory System
+The project now features an advanced memory system that allows agents to maintain context and consistency across story generations:
+
+- **Short-Term Memory**: Temporarily stores recent interactions and context during story creation
+- **Long-Term Memory**: Preserves valuable insights and story elements for continuity across sessions
+- **Entity Memory**: Tracks and organizes information about characters, places, and concepts
+- **Configurable Storage**: Custom storage paths and extensive configuration options
+- **Memory Management CLI**: Commands for viewing, resetting, and exporting memory
+
+Memory management example:
+```bash
+# List memory for all genres
+pulp-fiction memory list
+
+# List memory for a specific genre
+pulp-fiction memory list --genre noir
+
+# Reset memory for a genre
+pulp-fiction memory reset --genre scifi --type all
+
+# Export memory to a directory
+pulp-fiction memory export ./memory_backup --genre western
+```
+
+Memory is configured in the config.yaml file:
+```yaml
+# Memory settings
+memory:
+  enable: true
+  storage_dir: "./.memory"
+  # Memory component configuration
+  long_term:
+    enabled: true
+    db_path: "long_term_memory.db"
+  short_term:
+    enabled: true 
+    provider: "rag"
+  entity:
+    enabled: true
+    track_entities: true
+  # Embedding configuration
+  embedder:
+    provider: "openai"
+    model: "text-embedding-3-small"
+```
+
+### Enhanced Agent Tools
+The project now integrates a comprehensive set of CrewAI tools to enhance agent capabilities:
+
+- **Web Search**: Agents can research topics to improve accuracy and realism
+- **File Operations**: Read and analyze reference material and previously generated content
+- **Directory Management**: Work with collections of reference documents
+- **RAG Capabilities**: Use PDF, CSV, and other document types for reference
+- **Extensible Tool System**: Easy to add custom tools via the tool registry
+
+Tool usage example:
+```python
+# Create an agent with web search capabilities
+researcher = agent_factory.create_agent(
+    role="Researcher",
+    tools=["web_search"]
+)
+
+# Create an agent with multiple tools
+writer = agent_factory.create_agent(
+    role="Writer",
+    tools=[
+        "file_read",
+        "directory_read",
+        "rag"
+    ]
+)
+```
 
 ### Code Modularization
 The codebase has been significantly refactored to improve maintainability and extensibility:
@@ -99,6 +175,115 @@ Plugins can be created and installed in several ways:
 3. Install as Python packages with the naming pattern `pulp-fiction-plugin-*`
 
 For detailed instructions on creating your own plugins, see [Plugin Development Guide](docs/plugin_development.md).
+
+### CrewAI Flows Integration
+
+The Pulp Fiction Generator now supports CrewAI Flows for more structured and efficient story generation. Flows provide several advantages:
+
+- **Structured Workflow**: Clearly defined phases for story generation
+- **State Management**: Improved handling of state between generation steps
+- **Visualization**: Visual representation of the story generation process
+- **Persistence**: Automatic state persistence for recovery and analysis
+
+#### Using CrewAI Flows
+
+You can use CrewAI Flows through the command line interface:
+
+```bash
+# Generate a story using the flow architecture
+pulp-fiction flow run --genre scifi --title "The Martian Chronicles"
+
+# Generate a flow visualization
+pulp-fiction flow plot --genre noir
+
+# Run a complete story generation with visualization
+pulp-fiction flow generate --genre western --visualize
+```
+
+#### Flow Architecture
+
+The story generation flow follows these steps:
+
+1. **Research**: Research the genre, tropes, and key elements
+2. **Worldbuilding**: Create the story world based on research
+3. **Character Development**: Create detailed characters
+4. **Plot Creation**: Develop a compelling plot
+5. **Draft Writing**: Write the initial story draft
+6. **Final Editing**: Polish the story into its final form
+
+Each phase builds on the previous ones, with results stored in a structured state. The state is automatically persisted to disk, allowing for recovery and analysis.
+
+#### State Persistence
+
+The flow state is automatically saved after each phase, creating:
+- A JSON file with the complete state
+- A text file with the output of each phase
+- A final story file with the completed story
+
+These files are stored in a timestamped directory structure for easy reference.
+
+## Working with Custom Inputs
+
+The Pulp Fiction Generator supports passing custom inputs to your story generation process. These can include variables like:
+
+- `title`: The title of your story
+- `protagonist_name`: Your main character's name
+- `setting`: The story setting
+- `theme`: The central theme or message of the story
+
+### Using Custom Inputs
+
+There are two ways to use custom inputs with the story generator:
+
+1. **Using the CrewCoordinator**:
+```python
+from pulp_fiction_generator.crews import CrewCoordinator
+from pulp_fiction_generator.models import StoryConfig
+
+# Create a coordinator
+coordinator = CrewCoordinator(agent_factory, model_service)
+
+# Define custom inputs
+custom_inputs = {
+    "title": "The Dark Matter Mystery",
+    "protagonist_name": "Commander Zara",
+    "setting": "Aboard the starship Nebula"
+}
+
+# Generate a story with custom inputs
+story = coordinator.generate_story(
+    genre="scifi",
+    custom_inputs=custom_inputs
+)
+```
+
+2. **Using the StoryGenerator directly**:
+```python
+from pulp_fiction_generator.story import StoryGenerator
+
+# Create a generator
+generator = StoryGenerator(crew_factory)
+
+# Define custom inputs
+custom_inputs = {
+    "title": "The Dark Matter Mystery",
+    "protagonist_name": "Commander Zara"
+}
+
+# Generate a story with custom inputs
+story = generator.generate_story(
+    genre="scifi",
+    custom_inputs=custom_inputs
+)
+```
+
+### Implementation Details
+
+The CrewFactory has been updated to properly handle custom inputs in the following ways:
+
+- A new `create_basic_crew_with_inputs` method that attaches custom inputs to the crew
+- Updated methods for `create_continuation_crew` and `create_custom_crew` to also support custom inputs
+- Improved execution engine that checks for custom inputs in multiple places
 
 ## Setup
 

@@ -58,8 +58,8 @@ class TestContextVisualizer:
         
         assert visualizer.enabled is True
         assert visualizer.output_dir == temp_dir
-        assert visualizer.context_history == []
-        assert visualizer.agent_interactions == []
+        assert visualizer.data.get_context_history() == []
+        assert visualizer.data.get_agent_interactions() == []
     
     def test_init_creates_output_dir(self):
         """Test that initialization creates the output directory if it doesn't exist."""
@@ -71,16 +71,17 @@ class TestContextVisualizer:
     
     def test_visualize_context(self, visualizer, sample_context, temp_dir):
         """Test visualizing a context."""
-        with patch.object(visualizer, 'console') as mock_console:
+        with patch.object(visualizer, 'console_visualizer') as mock_console:
             visualizer.visualize_context(sample_context, stage="test_stage")
             
             # Check that console output was called
-            assert mock_console.print.call_count >= 2
+            assert mock_console.visualize_context.called
             
             # Check that the context was saved to history
-            assert len(visualizer.context_history) == 1
-            assert visualizer.context_history[0]['stage'] == "test_stage"
-            assert visualizer.context_history[0]['context'] == sample_context
+            history = visualizer.data.get_context_history()
+            assert len(history) == 1
+            assert history[0]['stage'] == "test_stage"
+            assert history[0]['context'] == sample_context
             
             # Check that a JSON file was created
             files = os.listdir(temp_dir)
@@ -91,7 +92,7 @@ class TestContextVisualizer:
         disabled_visualizer.visualize_context(sample_context, stage="test_stage")
         
         # Check that nothing was saved to history
-        assert len(disabled_visualizer.context_history) == 0
+        assert len(disabled_visualizer.data.get_context_history()) == 0
         
         # Check that no files were created
         files = os.listdir(temp_dir)
@@ -104,7 +105,7 @@ class TestContextVisualizer:
         output_context['title'] = "The Modified Goodbye"
         output_context['plot']['act_3'] = "Marlowe solves the mystery"
         
-        with patch.object(visualizer, 'console') as mock_console:
+        with patch.object(visualizer, 'console_visualizer') as mock_console:
             visualizer.track_agent_interaction(
                 agent_name="test_agent",
                 input_context=input_context,
@@ -114,11 +115,12 @@ class TestContextVisualizer:
             )
             
             # Check that console output was called
-            assert mock_console.print.call_count >= 2
+            assert mock_console.visualize_agent_interaction.called
             
             # Check that the interaction was saved
-            assert len(visualizer.agent_interactions) == 1
-            interaction = visualizer.agent_interactions[0]
+            interactions = visualizer.data.get_agent_interactions()
+            assert len(interactions) == 1
+            interaction = interactions[0]
             assert interaction['agent'] == "test_agent"
             assert interaction['input_context'] == input_context
             assert interaction['output_context'] == output_context
@@ -145,7 +147,7 @@ class TestContextVisualizer:
             "new_field": "This is new"
         }
         
-        diff = visualizer._calculate_context_diff(before, after)
+        diff = visualizer.diff_calculator.calculate_diff(before, after)
         
         assert "title" in diff
         assert diff["title"] == ("Original Title", "Modified Title")
@@ -179,7 +181,7 @@ class TestContextVisualizer:
         )
         
         # Export to HTML
-        with patch.object(visualizer, 'console') as mock_console:
+        with patch.object(visualizer, 'console_visualizer') as mock_console:
             output_path = visualizer.export_visualization_html()
             
             # Check that the file was created
@@ -196,7 +198,7 @@ class TestContextVisualizer:
                 assert "editor" in content
                 
             # Check that console output was called
-            mock_console.print.assert_called_once()
+            mock_console.show_export_confirmation.assert_called_once()
     
     def test_no_export_when_empty(self, visualizer, temp_dir):
         """Test that no HTML is exported when there's no history."""

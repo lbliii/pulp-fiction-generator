@@ -49,7 +49,11 @@ class AgentConfigLoader:
                 "goal": "Uncover genre-appropriate elements, historical context, and reference material",
                 "backstory": "A meticulous researcher with deep knowledge of pulp fiction history across multiple genres",
                 "verbose": True,
-                "allow_delegation": False
+                "allow_delegation": False,
+                "memory": True,
+                "respect_context_window": True,
+                "max_iter": 25,
+                "max_retry_limit": 3
             }
         )
         
@@ -60,7 +64,11 @@ class AgentConfigLoader:
                 "goal": "Create vivid, immersive settings with appropriate atmosphere and rules",
                 "backstory": "A visionary designer who excels at crafting the perfect backdrop for pulp stories",
                 "verbose": True,
-                "allow_delegation": False
+                "allow_delegation": False,
+                "memory": True,
+                "respect_context_window": True,
+                "max_iter": 20,
+                "max_retry_limit": 2
             }
         )
         
@@ -71,7 +79,11 @@ class AgentConfigLoader:
                 "goal": "Develop memorable, genre-appropriate characters with clear motivations",
                 "backstory": "A character specialist who understands the archetypes and psychology of pulp fiction protagonists and antagonists",
                 "verbose": True,
-                "allow_delegation": False
+                "allow_delegation": False,
+                "memory": True,
+                "respect_context_window": True,
+                "max_iter": 20,
+                "max_retry_limit": 2
             }
         )
         
@@ -82,7 +94,11 @@ class AgentConfigLoader:
                 "goal": "Craft engaging plot structures with appropriate pacing and twists",
                 "backstory": "A master storyteller with expertise in pulp narrative structures and cliffhangers",
                 "verbose": True,
-                "allow_delegation": False
+                "allow_delegation": True,
+                "memory": True,
+                "respect_context_window": True,
+                "max_iter": 30,
+                "max_retry_limit": 3
             }
         )
         
@@ -93,7 +109,11 @@ class AgentConfigLoader:
                 "goal": "Generate engaging, genre-appropriate prose that brings the story to life",
                 "backstory": "A wordsmith with a knack for capturing the distinctive voice of various pulp fiction genres",
                 "verbose": True,
-                "allow_delegation": False
+                "allow_delegation": True,
+                "memory": True,
+                "respect_context_window": True,
+                "max_iter": 30,
+                "max_retry_limit": 3
             }
         )
         
@@ -104,7 +124,11 @@ class AgentConfigLoader:
                 "goal": "Polish and improve the story while maintaining voice and consistency",
                 "backstory": "A detail-oriented editor with experience improving pulp fiction while preserving its essence",
                 "verbose": True,
-                "allow_delegation": False
+                "allow_delegation": False,
+                "memory": True,
+                "respect_context_window": True,
+                "max_iter": 25,
+                "max_retry_limit": 2
             }
         )
     

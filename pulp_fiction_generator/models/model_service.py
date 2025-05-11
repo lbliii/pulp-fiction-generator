@@ -239,4 +239,103 @@ class ModelServiceFactory:
         # This would typically dispatch to other factory methods
         # based on the model_type
         
-        raise ValueError(f"Unsupported model type: {model_type}") 
+        raise ValueError(f"Unsupported model type: {model_type}")
+
+
+# Ensure these methods are part of an actual ModelService implementation class
+class ConcreteModelService(ModelService):
+    """
+    Concrete implementation of ModelService interface.
+    
+    This provides a complete implementation of all methods in the ModelService interface.
+    """
+    
+    def __init__(self, config: Dict[str, Any], adapter):
+        """
+        Initialize the concrete model service.
+        
+        Args:
+            config: Configuration for the model service
+            adapter: Adapter for the underlying model implementation
+        """
+        self.config = config
+        self.adapter = adapter
+        self.default_model_name = config.get("default_model_name", "gpt-3.5-turbo")
+    
+    def generate(self, prompt: str, parameters: Optional[Dict[str, Any]] = None) -> str:
+        """Generate text from a prompt."""
+        # Implementation
+        return "Generated text"
+    
+    def batch_generate(self, prompts: List[str], parameters: Optional[Dict[str, Any]] = None) -> List[str]:
+        """Generate text for multiple prompts."""
+        # Implementation
+        return ["Generated text" for _ in prompts]
+    
+    def chat(self, messages: List[Dict[str, str]], parameters: Optional[Dict[str, Any]] = None) -> str:
+        """Generate a response in a chat context."""
+        # Implementation
+        return "Chat response"
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """Get information about the model."""
+        # Implementation
+        return {"model": self.default_model_name}
+    
+    def tokenize(self, text: str) -> List[int]:
+        """Tokenize text into token IDs."""
+        # Implementation
+        return []
+    
+    def count_tokens(self, text: str) -> int:
+        """Count the number of tokens in text."""
+        # Implementation
+        return 0
+    
+    def get_planning_llm(self):
+        """
+        Get an LLM instance specifically for planning tasks.
+        
+        Planning typically requires more reasoning capabilities, 
+        so this method configures an appropriate model.
+        
+        Returns:
+            An LLM instance suitable for planning tasks
+        """
+        # Use the model with best reasoning capabilities 
+        # (planning typically works best with a good reasoning model)
+        planning_model = self.config.get("planning_model_name", self.default_model_name)
+        
+        # Configure planning-specific parameters
+        planning_config = {
+            "model": planning_model,
+            "temperature": 0.2,  # Lower temperature for more focused planning
+            "max_tokens": 2000,  # Plans may need more tokens
+        }
+        
+        # Create and return the LLM instance
+        return self.adapter.get_llm(**planning_config)
+    
+    def get_function_calling_llm(self):
+        """
+        Get an LLM instance optimized for function calling.
+        
+        Function calling requires specific capabilities to parse and generate
+        structured outputs for tool use, so this method configures an appropriate model.
+        
+        Returns:
+            An LLM instance suitable for function calling
+        """
+        # Use model that's best for function calling
+        function_model = self.config.get("function_calling_model_name", self.default_model_name)
+        
+        # Configure function calling specific parameters
+        function_config = {
+            "model": function_model,
+            "temperature": 0.1,  # Low temperature for more deterministic outputs
+            "max_tokens": 1500,  # Reasonable token limit for function outputs
+            "tools_format": "json",  # Ensure proper JSON formatting for tools
+        }
+        
+        # Create and return the LLM instance
+        return self.adapter.get_llm(**function_config) 

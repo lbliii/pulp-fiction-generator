@@ -69,7 +69,9 @@ def with_error_handling(
                 )
                 
                 # If we got a result from recovery, return it
-                if isinstance(error_info, dict) and "recovery" in error_info and error_info["recovery"].get("success", False):
+                if isinstance(error_info, tuple) and len(error_info) == 2:
+                    return error_info[1]  # Return the recovery result
+                elif isinstance(error_info, dict) and "recovery" in error_info and error_info["recovery"].get("success", False):
                     if "result" in error_info:
                         return error_info["result"]
                 

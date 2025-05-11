@@ -88,13 +88,17 @@ class ModelRetryStrategy(RecoveryStrategy):
             raise ValueError("Cannot retry without original function")
             
         if retry_count >= ModelRetryStrategy.MAX_RETRIES:
-            logger.error(f"Maximum retries ({ModelRetryStrategy.MAX_RETRIES}) reached for {original_function.__name__}")
+            # Get the function name safely
+            func_name = getattr(original_function, "__name__", "function")
+            logger.error(f"Maximum retries ({ModelRetryStrategy.MAX_RETRIES}) reached for {func_name}")
             raise error
         
         # Wait before retrying
         time.sleep(ModelRetryStrategy.RETRY_DELAY * (retry_count + 1))
         
-        logger.info(f"Retrying {original_function.__name__} (attempt {retry_count + 1}/{ModelRetryStrategy.MAX_RETRIES})")
+        # Get the function name safely
+        func_name = getattr(original_function, "__name__", "function")
+        logger.info(f"Retrying {func_name} (attempt {retry_count + 1}/{ModelRetryStrategy.MAX_RETRIES})")
         
         # Update retry count in context
         kwargs["_retry_context"] = {

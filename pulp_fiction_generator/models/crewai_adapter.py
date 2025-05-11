@@ -108,7 +108,7 @@ class CrewAIModelAdapter:
         
         # Call the OllamaAdapter with the extracted message
         start_time = time.time()
-        response_text = self.ollama_adapter.generate(
+        response_text = self.ollama_adapter.generate_with_system(
             prompt=user_message,
             system_prompt=system_message,
             temperature=temperature,

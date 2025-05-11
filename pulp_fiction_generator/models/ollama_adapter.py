@@ -20,6 +20,10 @@ class TimeoutError(Exception):
     """Exception raised when a function call times out"""
     pass
 
+class ConnectionError(Exception):
+    """Exception raised when a connection to Ollama API fails"""
+    pass
+
 @contextmanager
 def timeout(seconds):
     """Context manager for timing out function calls"""
@@ -60,9 +64,16 @@ class OllamaAdapter(ModelService):
             api_base: Base URL for the Ollama API, overrides config if provided
             timeout: Request timeout in seconds
         """
-        # Use the centralized configuration with overrides if provided
-        self.model_name = model_name or config.ollama.model
-        self.api_base = api_base or config.ollama.host
+        # Check environment variables first, then use provided args, then fallback to config
+        env_model = os.environ.get("OLLAMA_MODEL")
+        env_host = os.environ.get("OLLAMA_HOST")
+        
+        # Set model name with priority: argument > environment > config
+        self.model_name = model_name or env_model or config.ollama.model
+        
+        # Set API base with priority: argument > environment > config
+        self.api_base = api_base or env_host or config.ollama.host
+        
         self.timeout = timeout
         
         # Get default resource configurations from config
@@ -70,6 +81,47 @@ class OllamaAdapter(ModelService):
         self.default_gpu_layers = config.ollama.gpu_layers
         self.default_ctx_size = config.ollama.ctx_size
         self.default_batch_size = config.ollama.batch_size
+        
+        # Verify connection on initialization
+        self._verify_connection()
+    
+    def _verify_connection(self) -> bool:
+        """
+        Verify that the Ollama API is reachable and the requested model exists.
+        
+        Returns:
+            True if connection is successful
+            
+        Raises:
+            ConnectionError: If connection to Ollama API fails
+            ValueError: If the requested model is not available
+        """
+        try:
+            response = requests.get(f"{self.api_base}/api/tags", timeout=10)
+            if response.status_code != 200:
+                raise ConnectionError(f"Ollama API returned error status: {response.status_code}")
+            
+            models = response.json().get("models", [])
+            model_names = [m.get("name") for m in models]
+            
+            # Check if the model exists (allowing for tags/versions)
+            model_found = False
+            base_model_name = self.model_name.split(":")[0] if ":" in self.model_name else self.model_name
+            
+            for name in model_names:
+                if name == self.model_name or name.startswith(f"{base_model_name}:"):
+                    model_found = True
+                    break
+            
+            if not model_found:
+                # Try to provide a helpful error message with available models
+                available_models = ', '.join(model_names) if model_names else "No models found"
+                raise ValueError(f"Model '{self.model_name}' not found. Available models: {available_models}")
+            
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Failed to connect to Ollama API at {self.api_base}: {str(e)}. Is Ollama running?")
     
     def get_default_ollama_params(self) -> Dict[str, Any]:
         """
@@ -90,6 +142,11 @@ class OllamaAdapter(ModelService):
             
         Returns:
             The generated text
+            
+        Raises:
+            ConnectionError: If connection to Ollama API fails
+            ValueError: If the parameters are invalid
+            RuntimeError: If the Ollama API returns an error response
         """
         generate_url = f"{self.api_base}/api/generate"
         
@@ -112,24 +169,65 @@ class OllamaAdapter(ModelService):
                 # Remove the ollama_params to prevent it from being added directly
                 ollama_params = parameters.pop("ollama_params")
             
-            # Add remaining parameters
-            payload.update({k: v for k, v in parameters.items() if k not in ["model", "prompt", "stream"]})
+            # Map common parameter names to Ollama-specific options
+            param_mapping = {
+                "max_tokens": "num_predict",
+                "temperature": "temperature",
+                "top_p": "top_p",
+                "top_k": "top_k",
+                "repeat_penalty": "repeat_penalty"
+            }
+            
+            # Add mapped parameters to options
+            for param_name, ollama_name in param_mapping.items():
+                if param_name in parameters:
+                    payload["options"][ollama_name] = parameters[param_name]
+            
+            # Add remaining parameters at the top level
+            payload.update({k: v for k, v in parameters.items() 
+                          if k not in param_mapping and k not in ["model", "prompt", "stream"]})
         
-        # Make the request
-        response = requests.post(
-            generate_url, 
-            json=payload,
-            timeout=self.timeout
-        )
-        
-        # Check for errors
-        if response.status_code != 200:
-            raise Exception(f"Ollama API error: {response.status_code}, {response.text}")
-        
-        # Parse the response
-        response_data = response.json()
-        
-        return response_data.get("response", "")
+        # Make the request with appropriate error handling
+        try:
+            response = requests.post(
+                generate_url, 
+                json=payload,
+                timeout=self.timeout
+            )
+            
+            # Check for errors
+            if response.status_code != 200:
+                error_message = f"Ollama API error: {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_message += f", {error_data['error']}"
+                    else:
+                        error_message += f", {response.text}"
+                except:
+                    error_message += f", {response.text}"
+                
+                raise RuntimeError(error_message)
+            
+            # Parse the response
+            response_data = response.json()
+            
+            result = response_data.get("response", "")
+            
+            # Verify the result is not empty
+            if not result.strip():
+                raise ValueError("Ollama returned an empty response. The model may be experiencing issues.")
+                
+            return result
+            
+        except requests.exceptions.Timeout:
+            raise TimeoutError(f"Request to Ollama API timed out after {self.timeout} seconds")
+        except requests.exceptions.ConnectionError:
+            raise ConnectionError(f"Failed to connect to Ollama API at {self.api_base}. Is Ollama running?")
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Request to Ollama API failed: {str(e)}")
+        except json.JSONDecodeError:
+            raise RuntimeError(f"Failed to parse response from Ollama API: invalid JSON")
     
     def chat(
         self, 
@@ -295,7 +393,7 @@ class OllamaAdapter(ModelService):
         
         return response.json()
     
-    def generate(
+    def generate_with_system(
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
@@ -305,7 +403,7 @@ class OllamaAdapter(ModelService):
         **kwargs
     ) -> str:
         """
-        Generate text from a prompt.
+        Generate text from a prompt with a system prompt.
         
         Args:
             prompt: The prompt to generate from
@@ -384,4 +482,33 @@ class OllamaAdapter(ModelService):
             # Parse the response
             response_data = response.json()
             
-            return response_data.get("response", "") 
+            return response_data.get("response", "")
+    
+    def get_planning_llm(self):
+        """
+        Get an LLM instance specifically for planning tasks.
+        
+        Planning typically requires more reasoning capabilities, 
+        so this method configures an appropriate model.
+        
+        Returns:
+            An LLM instance suitable for planning tasks
+        """
+        # Create a version of this adapter configured for planning
+        # In a more complete implementation, this would return a proper LLM instance
+        # but for now we'll just return self to fix the immediate error
+        return self
+    
+    def get_function_calling_llm(self):
+        """
+        Get an LLM instance optimized for function calling.
+        
+        Function calling requires specific capabilities to parse and generate
+        structured outputs for tool use.
+        
+        Returns:
+            An LLM instance suitable for function calling
+        """
+        # Create a version of this adapter configured for function calling
+        # Similar to the planning LLM, we'll return self for now
+        return self 

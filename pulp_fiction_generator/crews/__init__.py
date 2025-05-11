@@ -1,19 +1,25 @@
 """
-Crew module for creating and managing agents that collaborate on story generation.
+Pulp fiction crew module.
 """
 
-from .config.crew_coordinator_config import CrewCoordinatorConfig
-from .crew_coordinator import CrewCoordinator
-from .crew_executor import CrewExecutor
 from .crew_factory import CrewFactory
-from .story_generator import StoryGenerator
-from .visualization_handler import VisualizationHandler
+from .crew_executor import CrewExecutor
+from .crew_coordinator import CrewCoordinator
+from ..story import StoryGenerator
+from .process_utils import (
+    ExtendedProcessType,
+    validate_process_config,
+    get_process_from_string,
+    get_process_description
+)
 
 __all__ = [
-    "CrewCoordinator",
-    "CrewCoordinatorConfig",
-    "CrewExecutor",
-    "CrewFactory",
-    "StoryGenerator",
-    "VisualizationHandler"
+    'CrewFactory',
+    'CrewExecutor',
+    'CrewCoordinator',
+    'StoryGenerator',
+    'ExtendedProcessType',
+    'validate_process_config',
+    'get_process_from_string',
+    'get_process_description'
 ] 

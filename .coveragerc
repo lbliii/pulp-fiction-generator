@@ -1,0 +1,23 @@
+[run]
+source = pulp_fiction_generator
+omit = 
+    */__pycache__/*
+    */.venv/*
+    */tests/*
+    */__init__.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    def __str__
+    raise NotImplementedError
+    raise ImportError
+    if __name__ == .__main__.:
+    pass
+    if typing.TYPE_CHECKING:
+    @abstractmethod
+
+[html]
+directory = coverage
+title = Pulp Fiction Generator Test Coverage 

@@ -6,6 +6,8 @@ import os
 import pytest
 import tempfile
 import logging
+import sys
+import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
@@ -50,13 +52,11 @@ def test_timeout_raises_exception():
     """Test that the timeout context manager raises TimeoutError after specified seconds."""
     with pytest.raises(TimeoutError):
         with timeout(0.1):
-            import time
             time.sleep(0.2)  # Sleep longer than the timeout
 
 def test_timeout_does_not_raise_if_fast_enough():
     """Test that the timeout context manager doesn't raise if operation completes in time."""
     with timeout(0.2):
-        import time
         time.sleep(0.1)  # Sleep shorter than the timeout
 
 # ===== Test Diagnostic Info =====

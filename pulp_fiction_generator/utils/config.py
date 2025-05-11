@@ -203,16 +203,28 @@ class Config:
             self.ollama.model = os.environ.get("OLLAMA_MODEL")
         
         if os.environ.get("OLLAMA_THREADS"):
-            self.ollama.threads = int(os.environ.get("OLLAMA_THREADS"))
+            try:
+                self.ollama.threads = int(os.environ.get("OLLAMA_THREADS"))
+            except ValueError:
+                print(f"Warning: Invalid OLLAMA_THREADS value: {os.environ.get('OLLAMA_THREADS')}. Using default: {self.ollama.threads}")
         
         if os.environ.get("OLLAMA_GPU_LAYERS"):
-            self.ollama.gpu_layers = int(os.environ.get("OLLAMA_GPU_LAYERS"))
+            try:
+                self.ollama.gpu_layers = int(os.environ.get("OLLAMA_GPU_LAYERS"))
+            except ValueError:
+                print(f"Warning: Invalid OLLAMA_GPU_LAYERS value: {os.environ.get('OLLAMA_GPU_LAYERS')}. Using default: {self.ollama.gpu_layers}")
         
         if os.environ.get("OLLAMA_CTX_SIZE"):
-            self.ollama.ctx_size = int(os.environ.get("OLLAMA_CTX_SIZE"))
+            try:
+                self.ollama.ctx_size = int(os.environ.get("OLLAMA_CTX_SIZE"))
+            except ValueError:
+                print(f"Warning: Invalid OLLAMA_CTX_SIZE value: {os.environ.get('OLLAMA_CTX_SIZE')}. Using default: {self.ollama.ctx_size}")
         
         if os.environ.get("OLLAMA_BATCH_SIZE"):
-            self.ollama.batch_size = int(os.environ.get("OLLAMA_BATCH_SIZE"))
+            try:
+                self.ollama.batch_size = int(os.environ.get("OLLAMA_BATCH_SIZE"))
+            except ValueError:
+                print(f"Warning: Invalid OLLAMA_BATCH_SIZE value: {os.environ.get('OLLAMA_BATCH_SIZE')}. Using default: {self.ollama.batch_size}")
         
         # App config
         if os.environ.get("DEBUG"):
@@ -229,16 +241,28 @@ class Config:
         
         # Generation config
         if os.environ.get("MAX_RETRY_COUNT"):
-            self.generation.max_retry_count = int(os.environ.get("MAX_RETRY_COUNT"))
+            try:
+                self.generation.max_retry_count = int(os.environ.get("MAX_RETRY_COUNT"))
+            except ValueError:
+                print(f"Warning: Invalid MAX_RETRY_COUNT value: {os.environ.get('MAX_RETRY_COUNT')}. Using default: {self.generation.max_retry_count}")
         
         if os.environ.get("GENERATION_TIMEOUT"):
-            self.generation.generation_timeout = int(os.environ.get("GENERATION_TIMEOUT"))
+            try:
+                self.generation.generation_timeout = int(os.environ.get("GENERATION_TIMEOUT"))
+            except ValueError:
+                print(f"Warning: Invalid GENERATION_TIMEOUT value: {os.environ.get('GENERATION_TIMEOUT')}. Using default: {self.generation.generation_timeout}")
         
         if os.environ.get("TEMPERATURE"):
-            self.generation.temperature = float(os.environ.get("TEMPERATURE"))
+            try:
+                self.generation.temperature = float(os.environ.get("TEMPERATURE"))
+            except ValueError:
+                print(f"Warning: Invalid TEMPERATURE value: {os.environ.get('TEMPERATURE')}. Using default: {self.generation.temperature}")
         
         if os.environ.get("TOP_P"):
-            self.generation.top_p = float(os.environ.get("TOP_P"))
+            try:
+                self.generation.top_p = float(os.environ.get("TOP_P"))
+            except ValueError:
+                print(f"Warning: Invalid TOP_P value: {os.environ.get('TOP_P')}. Using default: {self.generation.top_p}")
         
         # Agent config
         if os.environ.get("ENABLE_AGENT_DELEGATION"):
@@ -255,7 +279,10 @@ class Config:
             self.cache.cache_dir = os.environ.get("CACHE_DIR")
         
         if os.environ.get("MAX_CACHE_SIZE"):
-            self.cache.max_cache_size = int(os.environ.get("MAX_CACHE_SIZE"))
+            try:
+                self.cache.max_cache_size = int(os.environ.get("MAX_CACHE_SIZE"))
+            except ValueError:
+                print(f"Warning: Invalid MAX_CACHE_SIZE value: {os.environ.get('MAX_CACHE_SIZE')}. Using default: {self.cache.max_cache_size}")
     
     def _update_from_dict(self, data: Dict[str, Any]) -> None:
         """

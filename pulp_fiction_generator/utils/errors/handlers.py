@@ -91,6 +91,12 @@ class ErrorHandler:
         # Get the basic error information
         error_info = ErrorInformationExtractor.extract_error_info(e, context)
         
+        # Initialize recovery field
+        error_info["recovery"] = {
+            "attempted": False,
+            "reason": "Recovery not attempted"
+        }
+        
         # Collect full diagnostic information if requested
         if collect_diagnostics:
             error_info["diagnostics"] = DiagnosticCollector.collect_all()
@@ -123,6 +129,8 @@ class ErrorHandler:
             recovery_result = cls._attempt_recovery(e, context, error_info)
             if recovery_result is not None:
                 return recovery_result
+        else:
+            error_info["recovery"]["reason"] = "Recovery not requested"
         
         return error_info
     
@@ -155,7 +163,7 @@ class ErrorHandler:
                     "success": True
                 }
                 logger.info(f"Recovery successful with {strategy.__name__}")
-                return recovery_result
+                return (error_info, recovery_result)
             except Exception as recovery_error:
                 error_info["recovery"] = {
                     "attempted": True,
