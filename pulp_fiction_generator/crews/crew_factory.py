@@ -12,6 +12,7 @@ import os.path
 from crewai import Agent, Crew, Process, Task
 
 from ..agents.agent_factory import AgentFactory
+from ..agents.manager_agent import StoryManagerAgent
 from ..utils.errors import logger
 from .event_listeners import get_default_listeners
 
@@ -172,9 +173,9 @@ class CrewFactory:
     def __init__(
         self, 
         agent_factory: AgentFactory,
-        process: Process = Process.sequential,
+        process: Process = Process.hierarchical,
         verbose: bool = True,
-        enable_planning: bool = False,
+        enable_planning: bool = True,
         use_event_listeners: bool = True
     ):
         """
@@ -182,9 +183,9 @@ class CrewFactory:
         
         Args:
             agent_factory: Factory for creating agents
-            process: The execution process to use for crews
+            process: The execution process to use for crews (default: hierarchical)
             verbose: Whether crews should be verbose
-            enable_planning: Whether to enable planning for crews
+            enable_planning: Whether to enable planning for crews (default: True)
             use_event_listeners: Whether to use event listeners
         """
         self.agent_factory = agent_factory
@@ -193,6 +194,13 @@ class CrewFactory:
         self.enable_planning = enable_planning
         self.use_event_listeners = use_event_listeners
         self.event_listeners = get_default_listeners() if use_event_listeners else []
+        
+        # Create a StoryManagerAgent instance
+        self.story_manager_agent = StoryManagerAgent(
+            llm_config=self.agent_factory.get_default_llm_config(),
+            tools=self.agent_factory.get_manager_tools(),
+            verbose=self.verbose
+        )
     
     def validate_process_configuration(self, process: Process, config: Dict[str, Any]) -> bool:
         """
@@ -348,13 +356,21 @@ class CrewFactory:
         writer = self.agent_factory.create_writer(genre)
         editor = self.agent_factory.create_editor(genre)
         
+        # Create a manager agent if hierarchical process is used
+        manager_agent = None
+        if process == Process.hierarchical:
+            manager_agent = self.story_manager_agent.create_agent(genre)
+            effective_config["manager_agent"] = manager_agent
+        
         # Create tasks with appropriate descriptions for the genre
         research_task = Task(
             description=f"Research essential elements of {genre} pulp fiction, "
                       f"including common tropes, historical context, and reference materials. "
                       f"Create a comprehensive research brief that other agents can use.",
             agent=researcher,
-            expected_output="A detailed research brief with genre elements, tropes, historical context, and references"
+            expected_output="A detailed research brief with genre elements, tropes, historical context, and references",
+            async_execution=False,  # Force synchronous execution for better collaboration
+            delegation_enabled=True  # Enable delegation for this task
         )
         
         worldbuilding_task = Task(
@@ -362,7 +378,10 @@ class CrewFactory:
                       f"with appropriate atmosphere, rules, and distinctive features. "
                       f"Define the primary locations where the story will unfold.",
             agent=worldbuilder,
-            expected_output="A detailed world description with locations, atmosphere, and rules"
+            expected_output="A detailed world description with locations, atmosphere, and rules",
+            context=[research_task],  # Use context to explicitly link to previous tasks
+            async_execution=False,
+            delegation_enabled=True
         )
         
         character_task = Task(
@@ -370,7 +389,10 @@ class CrewFactory:
                       f"Develop a protagonist, an antagonist, and key supporting characters "
                       f"with clear motivations, backgrounds, and relationships.",
             agent=character_creator,
-            expected_output="Character profiles for all main characters including motivations and relationships"
+            expected_output="Character profiles for all main characters including motivations and relationships",
+            context=[research_task, worldbuilding_task],
+            async_execution=False,
+            delegation_enabled=True
         )
         
         plot_task = Task(
@@ -379,7 +401,10 @@ class CrewFactory:
                       f"of the main events and ensure it follows {genre} conventions while "
                       f"remaining fresh and engaging.",
             agent=plotter,
-            expected_output="A detailed plot outline with key events, conflicts, and resolution"
+            expected_output="A detailed plot outline with key events, conflicts, and resolution",
+            context=[research_task, worldbuilding_task, character_task],
+            async_execution=False,
+            delegation_enabled=True
         )
         
         writing_task = Task(
@@ -387,7 +412,10 @@ class CrewFactory:
                       f"Use appropriate style, voice, and dialogue for the genre. "
                       f"Create vivid descriptions and engaging narrative.",
             agent=writer,
-            expected_output="A complete draft of the story with appropriate style and voice"
+            expected_output="A complete draft of the story with appropriate style and voice",
+            context=[research_task, worldbuilding_task, character_task, plot_task],
+            async_execution=False,
+            delegation_enabled=True
         )
         
         editing_task = Task(
@@ -395,7 +423,10 @@ class CrewFactory:
                       f"plot, characters, and setting. Polish the prose while maintaining "
                       f"the appropriate {genre} style. Correct any errors or inconsistencies.",
             agent=editor,
-            expected_output="A polished, final version of the story"
+            expected_output="A polished, final version of the story",
+            context=[writing_task],  # Only need the writing task as direct context
+            async_execution=False,
+            delegation_enabled=True
         )
         
         # Apply any configuration overrides
@@ -414,16 +445,19 @@ class CrewFactory:
         if crew_config.get("use_event_listeners", self.use_event_listeners):
             event_listeners = crew_config.get("event_listeners", self.event_listeners)
         
+        # Build the list of agents, adding manager if it exists
+        agents = [
+            researcher,
+            worldbuilder,
+            character_creator,
+            plotter,
+            writer,
+            editor
+        ]
+        
         # Create the crew with enhanced features
         crew = Crew(
-            agents=[
-                researcher,
-                worldbuilder,
-                character_creator,
-                plotter,
-                writer,
-                editor
-            ],
+            agents=agents,
             tasks=[
                 research_task,
                 worldbuilding_task,
@@ -443,7 +477,8 @@ class CrewFactory:
             task_callback=task_callback,
             planning=enable_planning,
             planning_llm=planning_llm,
-            callbacks=event_listeners
+            callbacks=event_listeners,
+            manager_agent=manager_agent if process == Process.hierarchical else None
         )
         
         return crew

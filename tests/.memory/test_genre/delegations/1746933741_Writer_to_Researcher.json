@@ -1,0 +1,10 @@
+{
+  "delegator": "Writer",
+  "delegatee": "Researcher",
+  "task_description": "Find more noir elements",
+  "context": {},
+  "timestamp": 1746933741.530373,
+  "status": "delegated",
+  "completion_time": null,
+  "result": null
+}

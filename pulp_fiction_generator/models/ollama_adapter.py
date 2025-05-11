@@ -4,7 +4,7 @@ OllamaAdapter implements the ModelService interface for Ollama.
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union, Callable, Iterator
 
 import httpx
 import requests
@@ -132,16 +132,18 @@ class OllamaAdapter(ModelService):
         """
         return config.get_ollama_params()
     
-    def generate(self, prompt: str, parameters: Optional[Dict[str, Any]] = None) -> str:
+    def generate(self, prompt: str, parameters: Optional[Dict[str, Any]] = None, stream: bool = False) -> Union[str, Iterator[str]]:
         """
         Generate text from a prompt using Ollama's generate endpoint.
         
         Args:
             prompt: The input text to generate from
             parameters: Optional generation parameters
+            stream: Whether to stream the response
             
         Returns:
-            The generated text
+            If stream=False: The complete generated text as a string
+            If stream=True: An iterator yielding chunks of generated text
             
         Raises:
             ConnectionError: If connection to Ollama API fails
@@ -154,7 +156,7 @@ class OllamaAdapter(ModelService):
         payload = {
             "model": self.model_name,
             "prompt": prompt,
-            "stream": False
+            "stream": stream
         }
         
         # Initialize options with default parameters
@@ -187,7 +189,11 @@ class OllamaAdapter(ModelService):
             payload.update({k: v for k, v in parameters.items() 
                           if k not in param_mapping and k not in ["model", "prompt", "stream"]})
         
-        # Make the request with appropriate error handling
+        # If streaming is enabled, return a streaming iterator
+        if stream:
+            return self._generate_stream(generate_url, payload)
+        
+        # Otherwise, make a non-streaming request with appropriate error handling
         try:
             response = requests.post(
                 generate_url, 
@@ -198,36 +204,69 @@ class OllamaAdapter(ModelService):
             # Check for errors
             if response.status_code != 200:
                 error_message = f"Ollama API error: {response.status_code}"
+                
+                # Try to extract detailed error information
                 try:
-                    error_data = response.json()
-                    if "error" in error_data:
-                        error_message += f", {error_data['error']}"
-                    else:
-                        error_message += f", {response.text}"
-                except:
-                    error_message += f", {response.text}"
+                    error_detail = response.json()
+                    if "error" in error_detail:
+                        error_message = f"{error_message} - {error_detail['error']}"
+                except Exception:
+                    pass
                 
                 raise RuntimeError(error_message)
             
             # Parse the response
-            response_data = response.json()
-            
-            result = response_data.get("response", "")
-            
-            # Verify the result is not empty
-            if not result.strip():
-                raise ValueError("Ollama returned an empty response. The model may be experiencing issues.")
+            try:
+                result = response.json()
+                return result.get("response", "")
+            except json.JSONDecodeError:
+                raise RuntimeError("Failed to decode JSON response from Ollama API")
                 
-            return result
-            
         except requests.exceptions.Timeout:
             raise TimeoutError(f"Request to Ollama API timed out after {self.timeout} seconds")
-        except requests.exceptions.ConnectionError:
-            raise ConnectionError(f"Failed to connect to Ollama API at {self.api_base}. Is Ollama running?")
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Request to Ollama API failed: {str(e)}")
-        except json.JSONDecodeError:
-            raise RuntimeError(f"Failed to parse response from Ollama API: invalid JSON")
+            raise ConnectionError(f"Error connecting to Ollama API: {str(e)}")
+    
+    def _generate_stream(self, url: str, payload: Dict[str, Any]) -> Iterator[str]:
+        """
+        Generate streaming text from Ollama API.
+        
+        Args:
+            url: The API endpoint URL
+            payload: The request payload
+            
+        Yields:
+            Chunks of generated text as they become available
+            
+        Raises:
+            ConnectionError: If connection to Ollama API fails
+            RuntimeError: If the Ollama API returns an error response
+        """
+        try:
+            with requests.post(url, json=payload, stream=True, timeout=self.timeout) as response:
+                # Check for errors
+                if response.status_code != 200:
+                    error_message = f"Ollama API error: {response.status_code}"
+                    raise RuntimeError(error_message)
+                
+                # Process the streaming response
+                for line in response.iter_lines():
+                    if line:
+                        try:
+                            chunk = json.loads(line)
+                            # Only yield the response text
+                            if "response" in chunk:
+                                yield chunk["response"]
+                                
+                            # If done is True, we can stop
+                            if chunk.get("done", False):
+                                break
+                        except json.JSONDecodeError:
+                            continue
+        except requests.exceptions.Timeout:
+            raise TimeoutError(f"Streaming request to Ollama API timed out after {self.timeout} seconds")
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Error connecting to Ollama API for streaming: {str(e)}")
     
     def chat(
         self, 
@@ -400,33 +439,42 @@ class OllamaAdapter(ModelService):
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         stop: Optional[List[str]] = None,
+        stream: bool = False,
         **kwargs
-    ) -> str:
+    ) -> Union[str, Iterator[str]]:
         """
-        Generate text from a prompt with a system prompt.
+        Generate text with an optional system prompt.
         
         Args:
-            prompt: The prompt to generate from
+            prompt: The input prompt
             system_prompt: Optional system prompt for context
-            temperature: Sampling temperature (higher = more random)
-            max_tokens: Maximum number of tokens to generate
-            stop: Sequences that stop generation
-            **kwargs: Additional parameters passed to the API
+            temperature: Sampling temperature (0.0 to 1.0)
+            max_tokens: Maximum tokens to generate
+            stop: Stop sequences to end generation
+            stream: Whether to stream the response
+            **kwargs: Additional parameters
             
         Returns:
-            The generated text
+            If stream=False: The generated text
+            If stream=True: An iterator of text chunks
         """
-        response = self.api_generate(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stop_sequences=stop,
-            params=kwargs.get("params", None),
-            timeout_seconds=kwargs.get("timeout_seconds", 120)
-        )
+        # Create parameters dictionary
+        params = {
+            "temperature": temperature,
+            **kwargs
+        }
         
-        return response.get("response", "")
+        if max_tokens is not None:
+            params["max_tokens"] = max_tokens
+            
+        if stop is not None:
+            params["stop"] = stop
+            
+        # If system prompt is provided, use it
+        if system_prompt:
+            params["system"] = system_prompt
+            
+        return self.generate(prompt, params, stream=stream)
     
     async def generate_async(
         self, 

@@ -1,0 +1,23 @@
+{
+  "created_at": 1746933741.531564,
+  "last_updated": 1746933771.091267,
+  "context_version": 1,
+  "shared_knowledge": {
+    "test_key": {
+      "value": "test_value"
+    }
+  },
+  "agent_contributions": {
+    "Flow System": [
+      {
+        "key": "test_key",
+        "timestamp": 1746933741.5317178
+      },
+      {
+        "key": "test_key",
+        "timestamp": 1746933771.091267
+      }
+    ]
+  },
+  "collaborative_insights": []
+}

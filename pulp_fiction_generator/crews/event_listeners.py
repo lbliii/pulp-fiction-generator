@@ -10,6 +10,7 @@ import json
 import os
 from typing import Dict, Any, Optional, List
 
+# Updated imports to match available CrewAI events
 from crewai.utilities.events import (
     CrewKickoffStartedEvent,
     CrewKickoffCompletedEvent,
@@ -24,12 +25,35 @@ from crewai.utilities.events import (
     ToolUsageFinishedEvent,
     LLMCallStartedEvent,
     LLMCallCompletedEvent,
-    LLMCallFailedEvent,
+    LLMCallFailedEvent
 )
 from crewai.utilities.events.base_event_listener import BaseEventListener
 from crewai.utilities.events import crewai_event_bus
 
 from ..utils.errors import logger
+
+# Add import for delegation events if available
+# Note: If these aren't available, we'll create placeholders
+try:
+    from crewai.utilities.events import (
+        AgentDelegationStartedEvent,
+        AgentDelegationCompletedEvent
+    )
+    DELEGATION_EVENTS_AVAILABLE = True
+except ImportError:
+    # Create placeholder event classes for backwards compatibility
+    class AgentDelegationStartedEvent:
+        """Placeholder for delegation started event when not available."""
+        pass
+    
+    class AgentDelegationCompletedEvent:
+        """Placeholder for delegation completed event when not available."""
+        pass
+    
+    DELEGATION_EVENTS_AVAILABLE = False
+    logger.warning("Delegation events not available in this CrewAI version.")
+
+from ..utils.collaborative_memory import CollaborativeMemory
 
 
 # Legacy event listener classes (for backward compatibility)
@@ -431,6 +455,112 @@ class ProgressTrackingListener(BaseEventListener):
             logger.info(f"Execution completed in {elapsed:.2f} seconds")
 
 
+class CollaborationEventListener(BaseEventListener):
+    """
+    Event listener for collaboration events.
+    
+    This listener tracks delegations between agents and other collaborative events,
+    storing the information in the collaborative memory system.
+    """
+    
+    def __init__(self, memory: Optional[CollaborativeMemory] = None):
+        """
+        Initialize the collaboration event listener.
+        
+        Args:
+            memory: Optional collaborative memory instance, will be created if not provided
+        """
+        super().__init__()
+        self.memory = memory or CollaborativeMemory()
+        
+    def setup_listeners(self, event_bus):
+        """
+        Set up event listeners.
+        
+        Args:
+            event_bus: The event bus to attach listeners to
+        """
+        # Only register delegation event handlers if the events are available
+        if DELEGATION_EVENTS_AVAILABLE:
+            @event_bus.on(AgentDelegationStartedEvent)
+            def on_delegation_started(source, event):
+                delegator = event.delegator.role if hasattr(event.delegator, "role") else "Unknown"
+                delegatee = event.delegatee.role if hasattr(event.delegatee, "role") else "Unknown"
+                
+                logger.info(f"Delegation started: {delegator} → {delegatee}")
+                
+                # Record delegation in collaborative memory
+                self.memory.record_delegation(
+                    delegator=delegator,
+                    delegatee=delegatee,
+                    task_description=event.task_description,
+                    context={
+                        "task_id": event.task_id if hasattr(event, "task_id") else None,
+                        "timestamp": time.time()
+                    }
+                )
+            
+            @event_bus.on(AgentDelegationCompletedEvent)
+            def on_delegation_completed(source, event):
+                delegator = event.delegator.role if hasattr(event.delegator, "role") else "Unknown"
+                delegatee = event.delegatee.role if hasattr(event.delegatee, "role") else "Unknown"
+                
+                logger.info(f"Delegation completed: {delegator} → {delegatee}")
+                
+                # Generate a delegation ID to match the one created during started event
+                delegation_id = f"{int(event.timestamp)}_{delegator}_to_{delegatee}"
+                
+                # Update delegation record
+                self.memory.complete_delegation(
+                    delegation_id=delegation_id,
+                    result=event.result if hasattr(event, "result") else "Task completed",
+                    success=True
+                )
+                
+                # Add collaborative insight
+                self.memory.add_collaborative_insight(
+                    insight=f"Task delegated by {delegator} to {delegatee} was completed: {event.task_description[:100]}...",
+                    agents_involved=[delegator, delegatee]
+                )
+        else:
+            # If delegation events aren't available, use task events to infer delegations
+            logger.info("Using task events to infer delegations since delegation events aren't available")
+        
+        # Track task completion for potential collaboration detection
+        @event_bus.on(TaskCompletedEvent)
+        def on_task_completed(source, event):
+            # Get the agent role
+            agent_name = event.task.agent.role if hasattr(event.task, "agent") and hasattr(event.task.agent, "role") else "Unknown"
+            
+            # Record task completion in shared context
+            self.memory.update_shared_context(
+                key=f"task_completed_{int(time.time())}",
+                value={
+                    "agent": agent_name,
+                    "task_description": event.task.description if hasattr(event.task, "description") else "Unknown task",
+                    "timestamp": time.time()
+                },
+                agent_name=agent_name
+            )
+            
+            # Check if this task has context from other tasks, which might indicate collaboration
+            if hasattr(event.task, "context") and event.task.context:
+                context_agents = []
+                for ctx_task in event.task.context:
+                    if hasattr(ctx_task, "agent") and hasattr(ctx_task.agent, "role"):
+                        context_agents.append(ctx_task.agent.role)
+                
+                if context_agents:
+                    # This is a collaborative task that used context from other agents
+                    collaborators = list(set(context_agents + [agent_name]))
+                    
+                    if len(collaborators) > 1:  # Only if there's actual collaboration
+                        self.memory.add_collaborative_insight(
+                            insight=f"Collaborative task completed by {agent_name} using input from {', '.join(context_agents)}",
+                            agents_involved=collaborators
+                        )
+
+
 # Function to get CrewAI event listeners
 def get_crewai_listeners() -> List[BaseEventListener]:
     """
@@ -439,10 +569,16 @@ def get_crewai_listeners() -> List[BaseEventListener]:
     Returns:
         List of CrewAI event listeners
     """
-    return [
+    listeners = [
         CrewAILoggingListener(),
         ProgressTrackingListener()
     ]
+    
+    # Add the collaboration listener
+    memory = CollaborativeMemory()
+    listeners.append(CollaborationEventListener(memory=memory))
+    
+    return listeners
 
 
 # Initialize CrewAI event listeners

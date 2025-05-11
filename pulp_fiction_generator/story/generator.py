@@ -199,47 +199,116 @@ class StoryGenerator:
             story_state = story_state or self.state_manager
             story_state.set_project_directory(title)
             
-            # Initialize results
-            artifacts = StoryArtifacts(
-                genre=genre,
-                title=title
+            # Initialize story artifacts
+            artifacts = StoryArtifacts()
+            
+            # Define callback to capture task output and dispatch to the user's callback if provided
+            def task_output_callback(task: Task) -> None:
+                # Get the task name
+                task_name = task.name if hasattr(task, 'name') else "unknown"
+                
+                # Store the task output in artifacts
+                if hasattr(task, 'output'):
+                    task_output = task.output
+                    story_state.save_task_output(task_name, task_output)
+                    
+                    # Store in artifacts
+                    if task_name == "research":
+                        artifacts.research = task_output
+                    elif task_name == "research_expansion":
+                        artifacts.research_expanded = task_output
+                    elif task_name == "worldbuilding":
+                        artifacts.worldbuilding = task_output
+                    elif task_name == "characters":
+                        artifacts.characters = task_output
+                    elif task_name == "character_development":
+                        artifacts.characters_enhanced = task_output
+                    elif task_name == "plot":
+                        artifacts.plot = task_output
+                    elif task_name == "plot_twist":
+                        artifacts.plot_twist = task_output
+                    elif task_name == "draft":
+                        artifacts.draft = task_output
+                    elif task_name == "style_improvement":
+                        artifacts.style_improved = task_output
+                    elif task_name == "consistency_check":
+                        artifacts.consistency_fixed = task_output
+                    elif task_name == "final":
+                        artifacts.final_story = task_output
+                
+                # Call the provided callback
+                if chunk_callback:
+                    chunk_callback(task_name, task_output if hasattr(task, 'output') else None)
+                        
+            # Process each phase with proper error handling and fallback
+            self._process_step_with_fallback(
+                "research", 
+                self._process_research_phase,
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
+
+            self._process_worldbuilding_phase(
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
             )
             
-            # Create task output callback
-            def task_output_callback(task: Task) -> None:
-                """Process task output and store it in story state."""
-                task_type = task.name if hasattr(task, "name") else "unknown"
-                
-                # Get raw output from TaskOutput object
-                task_output = None
-                if hasattr(task, "output"):
-                    task_output = task.output.raw
-                
-                # Store the task output in story state
-                story_state.add_task_output(task_type, chapter_num, task_output)
-                
-                # Update artifacts
-                if task_type in artifacts.__dict__:
-                    setattr(artifacts, task_type, task_output)
-                
-                # Call user-provided callback if available
-                if chunk_callback:
-                    chunk_callback(task_type, task_output)
+            self._process_character_phase(
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
             
-            # Process each story generation phase
-            self._process_research_phase(genre, chapter_num, project_dir, task_output_callback, story_state, artifacts, timeout_seconds)
-            self._process_worldbuilding_phase(genre, chapter_num, project_dir, task_output_callback, story_state, artifacts, timeout_seconds)
-            self._process_character_phase(genre, chapter_num, project_dir, task_output_callback, story_state, artifacts, timeout_seconds)
-            self._process_plot_phase(genre, chapter_num, project_dir, task_output_callback, story_state, artifacts, timeout_seconds)
-            self._process_draft_phase(genre, chapter_num, project_dir, task_output_callback, story_state, artifacts, timeout_seconds)
-            self._process_final_phase(genre, chapter_num, project_dir, task_output_callback, story_state, artifacts, timeout_seconds)
+            self._process_plot_phase(
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
+            
+            self._process_draft_phase(
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
+            
+            self._process_final_phase(
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
             
             return artifacts
         finally:
             # Restore original debug mode
             self.debug_mode = original_debug_mode
             self.execution_engine.debug_mode = original_debug_mode
-    
+            
     def _process_research_phase(
         self, 
         genre: str, 
@@ -254,30 +323,61 @@ class StoryGenerator:
         Process the research phase of story generation.
         
         Args:
-            genre: The genre to generate for
-            chapter_num: Chapter number
-            project_dir: Project directory
-            callback: Callback function
-            story_state: Story state manager
-            artifacts: Story artifacts to update
-            timeout_seconds: Maximum time in seconds to wait for the phase
+            genre: The genre to research
+            chapter_num: The chapter number
+            project_dir: Project directory for output
+            callback: Callback for task output
+            story_state: State manager for tracking progress
+            artifacts: Story artifacts object for storing output
+            timeout_seconds: Timeout for the task
         """
-        if story_state.has_completed_task("research", chapter_num):
-            logger.info("Found existing research output in story state")
-            research_results = story_state.get_task_output("research", chapter_num)
-            artifacts.research = research_results
-        else:
-            logger.info(f"Starting research phase for {genre} story")
-            research_task = self.task_factory.create_research_task(
-                genre=genre,
-                chapter_num=chapter_num,
-                project_dir=project_dir,
-                callback=callback
+        # Skip if already completed
+        if story_state.has_task_output("research") and story_state.has_task_output("research_expansion"):
+            artifacts.research = story_state.get_task_output("research")
+            artifacts.research_expanded = story_state.get_task_output("research_expansion")
+            return
+            
+        # Create initial research task
+        research_task = self.task_factory.create_research_task(
+            genre=genre,
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+
+        # Execute the research task
+        research_output = self.execution_engine.execute_task(
+            research_task, 
+            timeout_seconds=timeout_seconds
+        )
+        
+        # Store the research output
+        artifacts.research = research_output
+        story_state.save_task_output("research", research_output)
+        
+        # Create and execute conditional research expansion task
+        research_expansion_task = self.task_factory.create_research_expansion_task(
+            genre=genre,
+            context=research_task,
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+        
+        try:
+            # Execute the conditional task - it will only run if the condition is met
+            research_expansion_output = self.execution_engine.execute_task(
+                research_expansion_task, 
+                timeout_seconds=timeout_seconds
             )
             
-            research_results = self.execution_engine.execute_task(research_task, timeout_seconds)
-            artifacts.research = research_results
-    
+            # Store the expanded research if task ran
+            if research_expansion_output:
+                artifacts.research_expanded = research_expansion_output
+                story_state.save_task_output("research_expansion", research_expansion_output)
+        except Exception as e:
+            logger.warning(f"Research expansion task failed or was skipped: {str(e)}")
+
     def _process_worldbuilding_phase(
         self, 
         genre: str, 
@@ -292,31 +392,42 @@ class StoryGenerator:
         Process the worldbuilding phase of story generation.
         
         Args:
-            genre: The genre to generate for
-            chapter_num: Chapter number
-            project_dir: Project directory
-            callback: Callback function
-            story_state: Story state manager
-            artifacts: Story artifacts to update
-            timeout_seconds: Maximum time in seconds to wait for the phase
+            genre: The genre for worldbuilding
+            chapter_num: The chapter number
+            project_dir: Project directory for output
+            callback: Callback for task output
+            story_state: State manager for tracking progress
+            artifacts: Story artifacts object for storing output
+            timeout_seconds: Timeout for the task
         """
-        if story_state.has_completed_task("worldbuilding", chapter_num):
-            logger.info("Found existing worldbuilding output in story state")
-            world = story_state.get_task_output("worldbuilding", chapter_num)
-            artifacts.worldbuilding = world
-        else:
-            logger.info(f"Starting worldbuilding phase for {genre} story")
-            worldbuilding_task = self.task_factory.create_worldbuilding_task(
-                genre=genre,
-                context=artifacts.research,
-                chapter_num=chapter_num,
-                project_dir=project_dir,
-                callback=callback
-            )
+        # Skip if already completed
+        if story_state.has_task_output("worldbuilding"):
+            artifacts.worldbuilding = story_state.get_task_output("worldbuilding")
+            return
+        
+        # Determine context - if we have expanded research, use it combined with basic research
+        context = artifacts.research
+        if hasattr(artifacts, 'research_expanded') and artifacts.research_expanded:
+            context = f"{artifacts.research}\n\nEXPANDED RESEARCH:\n{artifacts.research_expanded}"
+        
+        # Create and execute the worldbuilding task
+        worldbuilding_task = self.task_factory.create_worldbuilding_task(
+            genre=genre,
+            context=context,
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+        
+        worldbuilding_output = self.execution_engine.execute_task(
+            worldbuilding_task, 
+            timeout_seconds=timeout_seconds
+        )
+        
+        # Store the output
+        artifacts.worldbuilding = worldbuilding_output
+        story_state.save_task_output("worldbuilding", worldbuilding_output)
             
-            world = self.execution_engine.execute_task(worldbuilding_task, timeout_seconds)
-            artifacts.worldbuilding = world
-    
     def _process_character_phase(
         self, 
         genre: str, 
@@ -328,36 +439,64 @@ class StoryGenerator:
         timeout_seconds: int
     ) -> None:
         """
-        Process the character creation phase of story generation.
+        Process the character development phase of story generation.
         
         Args:
-            genre: The genre to generate for
-            chapter_num: Chapter number
-            project_dir: Project directory
-            callback: Callback function
-            story_state: Story state manager
-            artifacts: Story artifacts to update
-            timeout_seconds: Maximum time in seconds to wait for the phase
+            genre: The genre for character development
+            chapter_num: The chapter number
+            project_dir: Project directory for output
+            callback: Callback for task output
+            story_state: State manager for tracking progress
+            artifacts: Story artifacts object for storing output
+            timeout_seconds: Timeout for the task
         """
-        if story_state.has_completed_task("characters", chapter_num):
-            logger.info("Found existing characters output in story state")
-            characters = story_state.get_task_output("characters", chapter_num)
-            artifacts.characters = characters
-        else:
-            logger.info(f"Starting character creation phase for {genre} story")
-            context = f"Research: {artifacts.research}\n\nWorld: {artifacts.worldbuilding}"
-            
-            char_task = self.task_factory.create_character_task(
-                genre=genre,
-                context=context,
-                chapter_num=chapter_num,
-                project_dir=project_dir,
-                callback=callback
+        # Skip if already completed
+        if story_state.has_task_output("characters") and story_state.has_task_output("character_development"):
+            artifacts.characters = story_state.get_task_output("characters")
+            artifacts.characters_enhanced = story_state.get_task_output("character_development")
+            return
+        
+        # Create and execute the character task
+        character_task = self.task_factory.create_character_task(
+            genre=genre,
+            context=[artifacts.research, artifacts.worldbuilding],
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+        
+        character_output = self.execution_engine.execute_task(
+            character_task, 
+            timeout_seconds=timeout_seconds
+        )
+        
+        # Store the output
+        artifacts.characters = character_output
+        story_state.save_task_output("characters", character_output)
+        
+        # Create and execute conditional character development task
+        character_dev_task = self.task_factory.create_character_development_task(
+            genre=genre,
+            context=character_task,
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+        
+        try:
+            # Execute the conditional task - it will only run if the condition is met
+            character_dev_output = self.execution_engine.execute_task(
+                character_dev_task, 
+                timeout_seconds=timeout_seconds
             )
             
-            characters = self.execution_engine.execute_task(char_task, timeout_seconds)
-            artifacts.characters = characters
-    
+            # Store the enhanced characters if task ran
+            if character_dev_output:
+                artifacts.characters_enhanced = character_dev_output
+                story_state.save_task_output("character_development", character_dev_output)
+        except Exception as e:
+            logger.warning(f"Character development task failed or was skipped: {str(e)}")
+            
     def _process_plot_phase(
         self, 
         genre: str, 
@@ -372,33 +511,66 @@ class StoryGenerator:
         Process the plot development phase of story generation.
         
         Args:
-            genre: The genre to generate for
-            chapter_num: Chapter number
-            project_dir: Project directory
-            callback: Callback function
-            story_state: Story state manager
-            artifacts: Story artifacts to update
-            timeout_seconds: Maximum time in seconds to wait for the phase
+            genre: The genre for plot development
+            chapter_num: The chapter number
+            project_dir: Project directory for output
+            callback: Callback for task output
+            story_state: State manager for tracking progress
+            artifacts: Story artifacts object for storing output
+            timeout_seconds: Timeout for the task
         """
-        if story_state.has_completed_task("plot", chapter_num):
-            logger.info("Found existing plot output in story state")
-            plot = story_state.get_task_output("plot", chapter_num)
-            artifacts.plot = plot
-        else:
-            logger.info(f"Starting plot development phase for {genre} story")
-            context = f"Research: {artifacts.research}\n\nWorld: {artifacts.worldbuilding}\n\nCharacters: {artifacts.characters}"
-            
-            plot_task = self.task_factory.create_plot_task(
-                genre=genre,
-                context=context,
-                chapter_num=chapter_num,
-                project_dir=project_dir,
-                callback=callback
+        # Skip if already completed
+        if story_state.has_task_output("plot") and story_state.has_task_output("plot_twist"):
+            artifacts.plot = story_state.get_task_output("plot")
+            artifacts.plot_twist = story_state.get_task_output("plot_twist")
+            return
+        
+        # Determine character context
+        character_context = artifacts.characters
+        if hasattr(artifacts, 'characters_enhanced') and artifacts.characters_enhanced:
+            character_context = artifacts.characters_enhanced
+        
+        # Create and execute the plot task
+        plot_task = self.task_factory.create_plot_task(
+            genre=genre,
+            context=[artifacts.research, artifacts.worldbuilding, character_context],
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+        
+        plot_output = self.execution_engine.execute_task(
+            plot_task, 
+            timeout_seconds=timeout_seconds
+        )
+        
+        # Store the output
+        artifacts.plot = plot_output
+        story_state.save_task_output("plot", plot_output)
+        
+        # Create and execute conditional plot twist task
+        plot_twist_task = self.task_factory.create_plot_twist_task(
+            genre=genre,
+            context=plot_task,
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+        
+        try:
+            # Execute the conditional task - it will only run if the condition is met
+            plot_twist_output = self.execution_engine.execute_task(
+                plot_twist_task, 
+                timeout_seconds=timeout_seconds
             )
             
-            plot = self.execution_engine.execute_task(plot_task, timeout_seconds)
-            artifacts.plot = plot
-    
+            # Store the plot twist if task ran
+            if plot_twist_output:
+                artifacts.plot_twist = plot_twist_output
+                story_state.save_task_output("plot_twist", plot_twist_output)
+        except Exception as e:
+            logger.warning(f"Plot twist task failed or was skipped: {str(e)}")
+            
     def _process_draft_phase(
         self, 
         genre: str, 
@@ -413,34 +585,47 @@ class StoryGenerator:
         Process the draft writing phase of story generation.
         
         Args:
-            genre: The genre to generate for
-            chapter_num: Chapter number
-            project_dir: Project directory
-            callback: Callback function
-            story_state: Story state manager
-            artifacts: Story artifacts to update
-            timeout_seconds: Maximum time in seconds to wait for the phase
+            genre: The genre for writing
+            chapter_num: The chapter number
+            project_dir: Project directory for output
+            callback: Callback for task output
+            story_state: State manager for tracking progress
+            artifacts: Story artifacts object for storing output
+            timeout_seconds: Timeout for the task
         """
-        if story_state.has_completed_task("draft", chapter_num):
-            logger.info("Found existing draft output in story state")
-            draft = story_state.get_task_output("draft", chapter_num)
-            artifacts.draft = draft
-        else:
-            logger.info(f"Starting draft writing phase for {genre} story")
-            context = f"Research: {artifacts.research}\n\nWorld: {artifacts.worldbuilding}\n\n" \
-                    f"Characters: {artifacts.characters}\n\nPlot: {artifacts.plot}"
+        # Skip if already completed
+        if story_state.has_task_output("draft"):
+            artifacts.draft = story_state.get_task_output("draft")
+            return
+        
+        # Determine plot context
+        plot_context = artifacts.plot
+        if hasattr(artifacts, 'plot_twist') and artifacts.plot_twist:
+            plot_context = f"{artifacts.plot}\n\nPLOT TWIST:\n{artifacts.plot_twist}"
             
-            writing_task = self.task_factory.create_writing_task(
-                genre=genre,
-                context=context,
-                chapter_num=chapter_num,
-                project_dir=project_dir,
-                callback=callback
-            )
+        # Determine character context
+        character_context = artifacts.characters
+        if hasattr(artifacts, 'characters_enhanced') and artifacts.characters_enhanced:
+            character_context = artifacts.characters_enhanced
+        
+        # Create and execute the writing task
+        writing_task = self.task_factory.create_writing_task(
+            genre=genre,
+            context=[artifacts.research, artifacts.worldbuilding, character_context, plot_context],
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+        
+        draft_output = self.execution_engine.execute_task(
+            writing_task, 
+            timeout_seconds=timeout_seconds
+        )
+        
+        # Store the output
+        artifacts.draft = draft_output
+        story_state.save_task_output("draft", draft_output)
             
-            draft = self.execution_engine.execute_task(writing_task, timeout_seconds)
-            artifacts.draft = draft
-    
     def _process_final_phase(
         self, 
         genre: str, 
@@ -455,35 +640,86 @@ class StoryGenerator:
         Process the final editing phase of story generation.
         
         Args:
-            genre: The genre to generate for
-            chapter_num: Chapter number
-            project_dir: Project directory
-            callback: Callback function
-            story_state: Story state manager
-            artifacts: Story artifacts to update
-            timeout_seconds: Maximum time in seconds to wait for the phase
+            genre: The genre for editing
+            chapter_num: The chapter number
+            project_dir: Project directory for output
+            callback: Callback for task output
+            story_state: State manager for tracking progress
+            artifacts: Story artifacts object for storing output
+            timeout_seconds: Timeout for the task
         """
-        if story_state.has_completed_task("final_story", chapter_num):
-            logger.info("Found existing final story output in story state")
-            final_story = story_state.get_task_output("final_story", chapter_num)
-            artifacts.final_story = final_story
-        else:
-            logger.info(f"Starting final editing phase for {genre} story")
-            context = f"Draft: {artifacts.draft}\n\nResearch: {artifacts.research}\n\n" \
-                    f"World: {artifacts.worldbuilding}\n\nCharacters: {artifacts.characters}\n\n" \
-                    f"Plot: {artifacts.plot}"
-            
-            editing_task = self.task_factory.create_editing_task(
-                genre=genre,
-                context=context,
-                chapter_num=chapter_num,
-                project_dir=project_dir,
-                callback=callback,
-                output_pydantic=StoryOutput
+        # Skip if already completed
+        if story_state.has_task_output("final"):
+            artifacts.final_story = story_state.get_task_output("final")
+            return
+        
+        # Create and execute the style improvement task if needed
+        style_improvement_task = self.task_factory.create_style_improvement_task(
+            genre=genre,
+            context=artifacts.draft,
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+        
+        improved_draft = artifacts.draft
+        try:
+            # Execute the conditional task - it will only run if the condition is met
+            style_output = self.execution_engine.execute_task(
+                style_improvement_task, 
+                timeout_seconds=timeout_seconds
             )
             
-            final_story = self.execution_engine.execute_task(editing_task, timeout_seconds)
-            artifacts.final_story = final_story
+            # If the task ran, use the improved style as the current draft
+            if style_output:
+                improved_draft = style_output
+                artifacts.style_improved = style_output
+                story_state.save_task_output("style_improvement", style_output)
+        except Exception as e:
+            logger.warning(f"Style improvement task failed or was skipped: {str(e)}")
+            
+        # Create and execute the consistency check task if needed    
+        consistency_task = self.task_factory.create_consistency_check_task(
+            genre=genre,
+            context=improved_draft,
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+        
+        consistent_draft = improved_draft
+        try:
+            # Execute the conditional task - it will only run if the condition is met
+            consistency_output = self.execution_engine.execute_task(
+                consistency_task, 
+                timeout_seconds=timeout_seconds
+            )
+            
+            # If the task ran, use the consistency-fixed draft as the current draft
+            if consistency_output:
+                consistent_draft = consistency_output
+                artifacts.consistency_fixed = consistency_output
+                story_state.save_task_output("consistency_check", consistency_output)
+        except Exception as e:
+            logger.warning(f"Consistency check task failed or was skipped: {str(e)}")
+            
+        # Now do the final editing with the best draft we have
+        editing_task = self.task_factory.create_editing_task(
+            genre=genre,
+            context=consistent_draft,
+            chapter_num=chapter_num,
+            project_dir=project_dir,
+            callback=callback
+        )
+        
+        final_output = self.execution_engine.execute_task(
+            editing_task, 
+            timeout_seconds=timeout_seconds
+        )
+        
+        # Store the output
+        artifacts.final_story = final_output
+        story_state.save_task_output("final", final_output)
     
     def execute_detailed_research(
         self, 
@@ -796,4 +1032,335 @@ class StoryGenerator:
             genre=genre,
             output_file=output_file,
             custom_inputs=custom_inputs
-        ) 
+        )
+
+    def _process_raw_tool_outputs(
+        self,
+        genre: str,
+        tools: Dict[str, Any],
+        chapter_num: int,
+        project_dir: str,
+        callback: Callable,
+        story_state: StoryStateManager,
+        artifacts: StoryArtifacts,
+        timeout_seconds: int
+    ) -> None:
+        """
+        Process raw tool outputs before main story generation.
+        
+        Args:
+            genre: The genre for the tasks
+            tools: Dictionary of tools to use for different tasks
+            chapter_num: Chapter number
+            project_dir: Project directory
+            callback: Callback function
+            story_state: State manager
+            artifacts: Story artifacts for storing outputs
+            timeout_seconds: Timeout in seconds
+        """
+        logger.info("Processing raw tool outputs for additional data collection")
+        
+        # Dictionary mapping task names to artifacts attributes
+        task_to_artifact = {
+            "raw_genre_research": "raw_genre_research",
+            "raw_character_references": "raw_character_references",
+            "raw_style_examples": "raw_style_examples",
+            "raw_plot_structures": "raw_plot_structures"
+        }
+        
+        # Check for web search tool for research
+        if "search_tool" in tools:
+            # Skip if already completed
+            if not story_state.has_task_output("raw_genre_research"):
+                logger.info("Executing raw genre research task")
+                
+                try:
+                    # Create and execute the raw research task
+                    raw_research_task = self.task_factory.create_raw_research_task(
+                        genre=genre,
+                        tool=tools["search_tool"],
+                        chapter_num=chapter_num,
+                        project_dir=project_dir,
+                        callback=callback
+                    )
+                    
+                    raw_research_output = self.execution_engine.execute_task(
+                        raw_research_task, 
+                        timeout_seconds=timeout_seconds
+                    )
+                    
+                    # Store the output
+                    artifacts.raw_genre_research = raw_research_output
+                    story_state.save_task_output("raw_genre_research", raw_research_output)
+                except Exception as e:
+                    logger.warning(f"Raw genre research task failed: {str(e)}")
+        
+        # Check for character reference tool
+        if "character_tool" in tools:
+            # Skip if already completed
+            if not story_state.has_task_output("raw_character_references"):
+                logger.info("Executing raw character references task")
+                
+                try:
+                    # Create and execute the raw character references task
+                    raw_char_task = self.task_factory.create_raw_character_references_task(
+                        genre=genre,
+                        tool=tools["character_tool"],
+                        chapter_num=chapter_num,
+                        project_dir=project_dir,
+                        callback=callback
+                    )
+                    
+                    raw_char_output = self.execution_engine.execute_task(
+                        raw_char_task, 
+                        timeout_seconds=timeout_seconds
+                    )
+                    
+                    # Store the output
+                    artifacts.raw_character_references = raw_char_output
+                    story_state.save_task_output("raw_character_references", raw_char_output)
+                except Exception as e:
+                    logger.warning(f"Raw character references task failed: {str(e)}")
+        
+        # Check for style examples tool
+        if "style_tool" in tools:
+            # Skip if already completed
+            if not story_state.has_task_output("raw_style_examples"):
+                logger.info("Executing raw style examples task")
+                
+                try:
+                    # Create and execute the raw style examples task
+                    raw_style_task = self.task_factory.create_raw_style_examples_task(
+                        genre=genre,
+                        tool=tools["style_tool"],
+                        chapter_num=chapter_num,
+                        project_dir=project_dir,
+                        callback=callback
+                    )
+                    
+                    raw_style_output = self.execution_engine.execute_task(
+                        raw_style_task, 
+                        timeout_seconds=timeout_seconds
+                    )
+                    
+                    # Store the output
+                    artifacts.raw_style_examples = raw_style_output
+                    story_state.save_task_output("raw_style_examples", raw_style_output)
+                except Exception as e:
+                    logger.warning(f"Raw style examples task failed: {str(e)}")
+        
+        # Check for plot structures tool
+        if "plot_tool" in tools:
+            # Skip if already completed
+            if not story_state.has_task_output("raw_plot_structures"):
+                logger.info("Executing raw plot structures task")
+                
+                try:
+                    # Create and execute the raw plot structures task
+                    raw_plot_task = self.task_factory.create_raw_plot_structures_task(
+                        genre=genre,
+                        tool=tools["plot_tool"],
+                        chapter_num=chapter_num,
+                        project_dir=project_dir,
+                        callback=callback
+                    )
+                    
+                    raw_plot_output = self.execution_engine.execute_task(
+                        raw_plot_task, 
+                        timeout_seconds=timeout_seconds
+                    )
+                    
+                    # Store the output
+                    artifacts.raw_plot_structures = raw_plot_output
+                    story_state.save_task_output("raw_plot_structures", raw_plot_output)
+                except Exception as e:
+                    logger.warning(f"Raw plot structures task failed: {str(e)}")
+        
+        # Process any other tools that have been provided
+        for tool_name, tool in tools.items():
+            if tool_name not in ["search_tool", "character_tool", "style_tool", "plot_tool"]:
+                task_name = f"raw_{tool_name}"
+                
+                # Skip if already completed
+                if story_state.has_task_output(task_name):
+                    continue
+                
+                logger.info(f"Executing raw {tool_name} task")
+                
+                try:
+                    # Create a generic agent for this tool
+                    generic_agent = self.agent_factory.create_agent(
+                        role=f"{genre.title()} Specialist",
+                        goal=f"Gather information about {genre} using specialized tools",
+                        backstory=f"You are an expert in {genre} fiction with access to specialized research tools."
+                    )
+                    
+                    # Create and execute the task
+                    raw_task = self.task_factory.create_tool_task(
+                        name=task_name,
+                        description=f"Use the provided tool to gather information related to {genre} fiction.",
+                        agent=generic_agent,
+                        tool=tool,
+                        expected_output=f"Raw data from the {tool_name}",
+                        chapter_num=chapter_num,
+                        project_dir=project_dir,
+                        callback=callback
+                    )
+                    
+                    raw_output = self.execution_engine.execute_task(
+                        raw_task, 
+                        timeout_seconds=timeout_seconds
+                    )
+                    
+                    # Store the output if we have a matching field in artifacts
+                    if hasattr(artifacts, task_name):
+                        setattr(artifacts, task_name, raw_output)
+                    
+                    story_state.save_task_output(task_name, raw_output)
+                except Exception as e:
+                    logger.warning(f"Raw {tool_name} task failed: {str(e)}")
+
+    def generate_story_chunked_with_raw_tools(
+        self, 
+        genre: str, 
+        tools: Dict[str, Any],
+        custom_inputs: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None,
+        chunk_callback: Optional[Callable] = None,
+        debug_mode: Optional[bool] = None,
+        story_state: Optional[StoryStateManager] = None,
+        timeout_seconds: int = 120
+    ) -> StoryArtifacts:
+        """
+        Generate a story using a chunked approach with raw tool outputs.
+        
+        Args:
+            genre: The genre to generate for
+            tools: Dictionary of tools to use with forced output
+            custom_inputs: Optional custom inputs for the crew
+            config: Optional configuration overrides
+            chunk_callback: Optional callback function to execute after each chunk is completed
+            debug_mode: Override the default debug mode setting
+            story_state: Optional story state to check for already completed tasks
+            timeout_seconds: Maximum time in seconds to wait for each generation stage
+            
+        Returns:
+            StoryArtifacts object with all generated content including raw tool outputs
+        """
+        # Allow per-story debug mode override
+        original_debug_mode = self.debug_mode
+        if debug_mode is not None:
+            self.debug_mode = debug_mode
+            self.execution_engine.debug_mode = debug_mode
+        
+        try:
+            # Get the chapter number from custom inputs or default to 1
+            chapter_num = custom_inputs.get("chapter_number", 1) if custom_inputs else 1
+            title = custom_inputs.get("title", "Untitled Story") if custom_inputs else "Untitled Story"
+            project_dir = title.lower().replace(" ", "_")
+            
+            # Use provided story state or default manager
+            story_state = story_state or self.state_manager
+            story_state.set_project_directory(title)
+            
+            # Initialize story artifacts
+            artifacts = StoryArtifacts()
+            
+            # Define callback to capture task output and dispatch to the user's callback if provided
+            def task_output_callback(task: Task) -> None:
+                # Get the task name
+                task_name = task.name if hasattr(task, 'name') else "unknown"
+                
+                # Store the task output in artifacts
+                if hasattr(task, 'output'):
+                    task_output = task.output
+                    story_state.save_task_output(task_name, task_output)
+                    
+                    # Store in artifacts based on task name
+                    if hasattr(artifacts, task_name):
+                        setattr(artifacts, task_name, task_output)
+                
+                # Call the provided callback
+                if chunk_callback:
+                    chunk_callback(task_name, task_output if hasattr(task, 'output') else None)
+            
+            # First process raw tool outputs
+            self._process_raw_tool_outputs(
+                genre,
+                tools,
+                chapter_num,
+                project_dir,
+                task_output_callback,
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
+            
+            # Then process regular story generation phases
+            self._process_step_with_fallback(
+                "research", 
+                self._process_research_phase,
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
+
+            self._process_worldbuilding_phase(
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
+            
+            self._process_character_phase(
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
+            
+            self._process_plot_phase(
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
+            
+            self._process_draft_phase(
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
+            
+            self._process_final_phase(
+                genre, 
+                chapter_num, 
+                project_dir, 
+                task_output_callback, 
+                story_state,
+                artifacts,
+                timeout_seconds
+            )
+            
+            return artifacts
+        finally:
+            # Restore original debug mode
+            self.debug_mode = original_debug_mode
+            self.execution_engine.debug_mode = original_debug_mode 

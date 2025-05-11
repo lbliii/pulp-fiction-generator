@@ -58,6 +58,10 @@ class StoryStateManager:
         self.project_dir = "default_project"
         self.task_outputs: Dict[str, Dict[int, Any]] = {}
         self.chapters: Dict[int, str] = {}
+        self.current_chapter = 1
+        
+        # Simple key-value store for conditional tasks
+        self.task_store: Dict[str, Any] = {}
         
         # Create file tools if available
         self.file_read_tool = None
@@ -112,42 +116,30 @@ class StoryStateManager:
             logger.warning(f"Error checking task completion status: {e}")
             return False
     
-    def get_task_output(self, task_type: str, chapter_num: int) -> Optional[str]:
+    def get_task_output(self, task_type: str, chapter_num: Optional[int] = None) -> Optional[str]:
         """
-        Get the output of a completed task.
+        Get a task output.
+        
+        This is a simplified version that uses the current chapter if none is specified,
+        making it compatible with the conditional task implementation.
         
         Args:
             task_type: Type of task to retrieve
-            chapter_num: Chapter number to retrieve
+            chapter_num: Optional chapter number (defaults to current chapter)
             
         Returns:
             Task output content or None if not found
         """
-        # First check in-memory cache
-        if task_type in self.task_outputs and chapter_num in self.task_outputs[task_type]:
-            return self.task_outputs[task_type][chapter_num]
-        
-        # Then try to load from persistent storage
-        try:
-            filepath = self._get_task_filepath(task_type, chapter_num)
-            if os.path.exists(filepath):
-                if CREWAI_TOOLS_AVAILABLE and self.file_read_tool:
-                    # Use FileReadTool
-                    content = self.file_read_tool.read(filepath)
-                else:
-                    # Fallback to direct file reading
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                
-                # Cache the loaded content
-                if task_type not in self.task_outputs:
-                    self.task_outputs[task_type] = {}
-                self.task_outputs[task_type][chapter_num] = content
-                return content
-        except Exception as e:
-            logger.warning(f"Error loading task output: {e}")
-        
-        return None
+        # First check the simple key-value store (for conditional tasks)
+        if task_type in self.task_store:
+            return self.task_store[task_type]
+            
+        # Fall back to legacy storage
+        if chapter_num is None:
+            chapter_num = self.current_chapter
+            
+        # Use legacy method to retrieve
+        return self.get_task_output_by_chapter(task_type, chapter_num)
     
     def _get_task_filepath(self, task_type: str, chapter_num: int) -> str:
         """
@@ -296,4 +288,112 @@ class StoryStateManager:
             if chapter_num in chapters:
                 task_types.append(task_type)
                 
-        return task_types 
+        return task_types
+    
+    def save_task_output(self, task_type: str, output: Any, chapter_num: Optional[int] = None) -> None:
+        """
+        Save a task output to the state store.
+        
+        This is a simplified version that uses the current chapter if none is specified,
+        making it compatible with the conditional task implementation.
+        
+        Args:
+            task_type: Type of task
+            output: The task output
+            chapter_num: Optional chapter number (defaults to current chapter)
+        """
+        if chapter_num is None:
+            chapter_num = self.current_chapter
+            
+            # Also store in simple key-value store for conditional tasks
+            self.task_store[task_type] = output
+            
+        # Add to legacy storage system too
+        self.add_task_output(task_type, chapter_num, output)
+    
+    def has_task_output(self, task_type: str, chapter_num: Optional[int] = None) -> bool:
+        """
+        Check if a task output exists.
+        
+        This is a simplified version that uses the current chapter if none is specified,
+        making it compatible with the conditional task implementation.
+        
+        Args:
+            task_type: Type of task to check
+            chapter_num: Optional chapter number (defaults to current chapter)
+            
+        Returns:
+            True if the task output exists, False otherwise
+        """
+        # First check the simple key-value store (for conditional tasks)
+        if task_type in self.task_store:
+            return True
+            
+        # Fall back to legacy storage
+        if chapter_num is None:
+            chapter_num = self.current_chapter
+            
+        return self.has_completed_task(task_type, chapter_num)
+    
+    def get_task_output_by_chapter(self, task_type: str, chapter_num: int) -> Optional[str]:
+        """
+        Get the output of a completed task for a specific chapter.
+        
+        Args:
+            task_type: Type of task to retrieve
+            chapter_num: Chapter number to retrieve
+            
+        Returns:
+            Task output content or None if not found
+        """
+        # First check in-memory cache
+        if task_type in self.task_outputs and chapter_num in self.task_outputs[task_type]:
+            return self.task_outputs[task_type][chapter_num]
+        
+        # Then try to load from persistent storage
+        try:
+            filepath = self._get_task_filepath(task_type, chapter_num)
+            if os.path.exists(filepath):
+                if CREWAI_TOOLS_AVAILABLE and self.file_read_tool:
+                    # Use FileReadTool
+                    content = self.file_read_tool.read(filepath)
+                else:
+                    # Fallback to direct file reading
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                
+                # Cache the loaded content
+                if task_type not in self.task_outputs:
+                    self.task_outputs[task_type] = {}
+                self.task_outputs[task_type][chapter_num] = content
+                return content
+        except Exception as e:
+            logger.warning(f"Error loading task output: {e}")
+        
+        return None
+    
+    def get_all_task_outputs(self) -> Dict[str, Any]:
+        """
+        Get all task outputs from the simple key-value store.
+        
+        Returns:
+            Dictionary of task outputs
+        """
+        return self.task_store.copy()
+        
+    def set_current_chapter(self, chapter_num: int) -> None:
+        """
+        Set the current chapter number.
+        
+        Args:
+            chapter_num: Chapter number to set as current
+        """
+        self.current_chapter = max(1, int(chapter_num))
+        logger.info(f"Set current chapter to {self.current_chapter}")
+        
+    def reset_simple_store(self) -> None:
+        """
+        Reset the simple key-value store.
+        """
+        self.task_store.clear()
+        logger.info("Reset simple task store") 

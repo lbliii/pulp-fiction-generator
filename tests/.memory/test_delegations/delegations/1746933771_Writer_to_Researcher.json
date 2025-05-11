@@ -1,0 +1,12 @@
+{
+  "delegator": "Writer",
+  "delegatee": "Researcher",
+  "task_description": "Research the history of noir fiction",
+  "context": {
+    "importance": "high"
+  },
+  "timestamp": 1746933771.08794,
+  "status": "delegated",
+  "completion_time": null,
+  "result": null
+}

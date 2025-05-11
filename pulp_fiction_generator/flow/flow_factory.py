@@ -4,8 +4,10 @@ FlowFactory handles the creation and configuration of story generation flows.
 
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+import time
 
 from ..utils.errors import TimeoutError, logger
+from ..utils.collaborative_memory import CollaborativeMemory
 from .story_flow import StoryGenerationFlow, StoryState
 
 class FlowFactory:
@@ -24,12 +26,18 @@ class FlowFactory:
             crew_factory: The factory for creating crews that the flow will use
         """
         self.crew_factory = crew_factory
+        
+        # Configure crew factory to use hierarchical process by default
+        # This is set in the constructor now, but we ensure it here as well
+        self.crew_factory.process = "hierarchical"
+        self.crew_factory.enable_planning = True
     
     def create_story_flow(
         self, 
         genre: str, 
         custom_inputs: Optional[Dict[str, Any]] = None,
-        title: Optional[str] = None
+        title: Optional[str] = None,
+        use_collaboration: bool = True
     ) -> StoryGenerationFlow:
         """
         Create a flow for generating a story.
@@ -38,6 +46,7 @@ class FlowFactory:
             genre: The genre of the story
             custom_inputs: Optional custom inputs for the flow
             title: Optional title for the story
+            use_collaboration: Whether to use collaborative features
             
         Returns:
             A configured story generation flow
@@ -48,6 +57,20 @@ class FlowFactory:
             custom_inputs=custom_inputs or {},
             title=title or custom_inputs.get("title", "Untitled Story") if custom_inputs else "Untitled Story"
         )
+        
+        # Initialize collaborative memory if enabled
+        if use_collaboration:
+            # Set up a collaborative memory for this genre
+            self.collaborative_memory = CollaborativeMemory(
+                genre=genre,
+                storage_dir="./.memory"
+            )
+            
+            # Add collaborative memory to custom inputs so it can be accessed in the flow
+            if not initial_state.custom_inputs:
+                initial_state.custom_inputs = {}
+                
+            initial_state.custom_inputs["collaborative_memory"] = self.collaborative_memory
         
         print(f"Created initial state with genre: {initial_state.genre}")
         
@@ -62,7 +85,8 @@ class FlowFactory:
     def execute_flow(
         self, 
         flow: StoryGenerationFlow,
-        timeout_seconds: int = 300
+        timeout_seconds: int = 300,
+        track_delegations: bool = True
     ) -> Dict[str, Any]:
         """
         Execute a flow with timeout protection.
@@ -70,6 +94,7 @@ class FlowFactory:
         Args:
             flow: The flow to execute
             timeout_seconds: Maximum time to allow for execution
+            track_delegations: Whether to track delegations between agents
             
         Returns:
             The flow state after execution
@@ -79,12 +104,42 @@ class FlowFactory:
         """
         logger.info(f"Executing flow with timeout of {timeout_seconds} seconds")
         
+        if track_delegations and hasattr(self, 'collaborative_memory'):
+            # Initialize the collaborative memory for this flow
+            logger.info("Initializing collaborative memory for delegation tracking")
+            self.collaborative_memory.update_shared_context(
+                "flow_started", 
+                {"timestamp": time.time(), "genre": flow.state.genre},
+                "Flow System"
+            )
+        
         # Execute the flow with timeout
         with ThreadPoolExecutor() as executor:
             future = executor.submit(flow.kickoff)
             try:
                 result = future.result(timeout=timeout_seconds)
                 logger.info(f"Flow execution completed successfully")
+                
+                if track_delegations and hasattr(self, 'collaborative_memory'):
+                    # Record flow completion in collaborative memory
+                    self.collaborative_memory.update_shared_context(
+                        "flow_completed", 
+                        {"timestamp": time.time(), "genre": flow.state.genre},
+                        "Flow System"
+                    )
+                    
+                    # Store insights about the collaboration
+                    delegations = self.collaborative_memory._get_delegations_for_agent(
+                        agent_name="*", 
+                        as_delegatee=True
+                    )
+                    
+                    if delegations:
+                        self.collaborative_memory.add_collaborative_insight(
+                            f"Flow completed with {len(delegations)} delegations between agents",
+                            ["Flow System"]
+                        )
+                
                 return flow.state.dict()
             except FutureTimeoutError:
                 logger.error(f"Flow execution timed out after {timeout_seconds} seconds")
@@ -97,7 +152,8 @@ class FlowFactory:
         self, 
         genre: str, 
         custom_inputs: Optional[Dict[str, Any]] = None,
-        timeout_seconds: int = 300
+        timeout_seconds: int = 300,
+        use_collaboration: bool = True
     ) -> str:
         """
         Generate a story using a flow.
@@ -106,15 +162,24 @@ class FlowFactory:
             genre: The genre of the story
             custom_inputs: Optional custom inputs
             timeout_seconds: Maximum time for generation
+            use_collaboration: Whether to use collaborative features
             
         Returns:
             The generated story
         """
-        # Create the flow
-        flow = self.create_story_flow(genre, custom_inputs)
+        # Create the flow with collaboration if enabled
+        flow = self.create_story_flow(
+            genre, 
+            custom_inputs,
+            use_collaboration=use_collaboration
+        )
         
         # Execute the flow and get the result
-        result = self.execute_flow(flow, timeout_seconds)
+        result = self.execute_flow(
+            flow, 
+            timeout_seconds,
+            track_delegations=use_collaboration
+        )
         
         # Return the final story from the flow state
         return result.get("final_story", "")

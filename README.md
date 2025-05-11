@@ -15,8 +15,29 @@ This project uses CrewAI and Ollama (with Llama 3.2) to create a local, cost-eff
 - **Modular Architecture**: Easy to extend with new capabilities
 - **Enhanced Agent Tools**: Integrated with CrewAI tools for web search, file operations, and RAG capabilities
 - **Advanced Memory System**: Comprehensive memory system for maintaining context across story generations
+- **Agent Collaboration**: Agents can collaborate and delegate tasks to each other
 
 ## New Features
+
+### Enhanced Agent Collaboration
+The project now includes advanced collaboration features using CrewAI's latest capabilities:
+
+- **Hierarchical Processing**: Agent crews now operate in a hierarchical process mode where a manager agent oversees the work
+- **Task Delegation**: Agents can delegate specialized tasks to other agents with relevant expertise
+- **Context Sharing**: Agents share context and build upon each other's work in a more integrated manner
+- **Collaborative Memory**: Enhanced memory system tracks collaborative insights and delegations
+
+To use collaborative features:
+```bash
+# Generate a story with enhanced collaboration
+pulp-fiction generate --genre noir --collaborative
+
+# Visualize collaboration between agents
+pulp-fiction visualize --genre scifi --show-delegations
+
+# Show collaboration statistics for a previously generated story
+pulp-fiction analyze --collaboration
+```
 
 ### Enhanced Memory System
 The project now features an advanced memory system that allows agents to maintain context and consistency across story generations:
@@ -175,6 +196,47 @@ Plugins can be created and installed in several ways:
 3. Install as Python packages with the naming pattern `pulp-fiction-plugin-*`
 
 For detailed instructions on creating your own plugins, see [Plugin Development Guide](docs/plugin_development.md).
+
+### Plugin System Testing
+
+The Pulp Fiction Generator features a comprehensive testing framework for its plugin system, ensuring reliability and stability:
+
+- **High Test Coverage**: 96% test coverage across the plugin system
+- **Standalone Test Scripts**: Individual test scripts for each component:
+  - `tests/plugins/plugin_coverage.py`: Tests core plugin functionality and registry
+  - `tests/plugins/plugin_hooks_coverage.py`: Tests the plugin hook system
+  - `tests/plugins/plugin_manager_coverage.py`: Tests plugin discovery and management
+
+To run the plugin tests with coverage reporting:
+
+```bash
+# Run individual test components
+python tests/plugins/plugin_coverage.py
+python tests/plugins/plugin_hooks_coverage.py
+python tests/plugins/plugin_manager_coverage.py
+
+# Run all plugin tests with combined coverage report
+python -m coverage run -a tests/plugins/plugin_coverage.py && \
+python -m coverage run -a tests/plugins/plugin_hooks_coverage.py && \
+python -m coverage run -a tests/plugins/plugin_manager_coverage.py && \
+python -m coverage report -m --include="*/pulp_fiction_generator/plugins/*"
+
+# Alternatively, use the provided shell script
+./tests/plugins/run_plugin_tests.sh
+
+# Generate HTML coverage report with the shell script
+./tests/plugins/run_plugin_tests.sh --html
+```
+
+The plugin testing system includes:
+- Registry functionality verification
+- Hook registration and execution tests
+- Plugin discovery from multiple sources
+- Error handling for various failure scenarios
+- Auto-discovery of installed Python package plugins
+- Mocking capabilities for comprehensive testing
+
+For more information on testing the plugin system, see [Testing Documentation](docs/testing.md).
 
 ### CrewAI Flows Integration
 

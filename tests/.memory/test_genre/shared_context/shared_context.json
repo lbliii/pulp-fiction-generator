@@ -1,0 +1,66 @@
+{
+  "created_at": 1746933658.594147,
+  "last_updated": 1746933771.0896142,
+  "context_version": 1,
+  "shared_knowledge": {
+    "noir_elements": [
+      "shadows",
+      "rain",
+      "detective"
+    ]
+  },
+  "agent_contributions": {
+    "Researcher": [
+      {
+        "key": "noir_elements",
+        "timestamp": 1746933658.7164109
+      },
+      {
+        "key": "noir_elements",
+        "timestamp": 1746933711.771721
+      },
+      {
+        "key": "noir_elements",
+        "timestamp": 1746933741.530241
+      },
+      {
+        "key": "noir_elements",
+        "timestamp": 1746933771.0896142
+      }
+    ]
+  },
+  "collaborative_insights": [
+    {
+      "insight": "Writers and researchers work better together on noir fiction",
+      "agents_involved": [
+        "Writer",
+        "Researcher"
+      ],
+      "timestamp": 1746933658.715816
+    },
+    {
+      "insight": "Writers and researchers work better together on noir fiction",
+      "agents_involved": [
+        "Writer",
+        "Researcher"
+      ],
+      "timestamp": 1746933711.771026
+    },
+    {
+      "insight": "Writers and researchers work better together on noir fiction",
+      "agents_involved": [
+        "Writer",
+        "Researcher"
+      ],
+      "timestamp": 1746933741.529248
+    },
+    {
+      "insight": "Writers and researchers work better together on noir fiction",
+      "agents_involved": [
+        "Writer",
+        "Researcher"
+      ],
+      "timestamp": 1746933771.0886998
+    }
+  ]
+}

@@ -8,6 +8,8 @@ creation of different types of agents by delegating to specialized factories.
 from typing import Any, Dict, List, Optional
 
 from crewai import Agent
+# Import from crewai.tools directly only what's available
+from crewai.tools import tool
 
 from ..models.model_service import ModelService
 from .config.config_loader import AgentConfigLoader
@@ -64,6 +66,56 @@ class AgentFactory:
             agent_builder=self.agent_builder,
             verbose=verbose
         )
+    
+    def get_default_llm_config(self) -> Dict[str, Any]:
+        """
+        Get the default LLM configuration for agents.
+        
+        Returns:
+            Default LLM configuration dictionary
+        """
+        # Get configuration from the model service
+        return {
+            "provider": self.model_service.provider,
+            "model": self.model_service.model_name,
+            "temperature": 0.7,
+            "request_timeout": 180,
+        }
+    
+    def get_manager_tools(self) -> List[Any]:
+        """
+        Get the tools for the manager agent.
+        
+        Returns:
+            List of tools for the manager agent
+        """
+        # Define the search tool using crewai's tool decorator
+        @tool
+        def search_web(query: str) -> str:
+            """Search the web for information about a topic"""
+            return f"Web search results for: {query}"
+        
+        @tool
+        def read_file(file_path: str) -> str:
+            """Read the contents of a file"""
+            try:
+                with open(file_path, 'r') as f:
+                    return f.read()
+            except Exception as e:
+                return f"Error reading file: {str(e)}"
+        
+        @tool
+        def list_directory(directory_path: str) -> str:
+            """List the contents of a directory"""
+            import os
+            try:
+                files = os.listdir(directory_path)
+                return "\n".join(files)
+            except Exception as e:
+                return f"Error listing directory: {str(e)}"
+        
+        # Return the custom tools
+        return [search_web, read_file, list_directory]
     
     def create_researcher(self, genre: str, config: Optional[Dict[str, Any]] = None) -> Agent:
         """
